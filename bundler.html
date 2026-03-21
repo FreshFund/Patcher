@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MeasurePDF — Offline Bundler</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0f0f0f; color: #f0ede8;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 16px;
+    padding: 36px 32px; max-width: 480px; width: 100%;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+  h1 span { color: #ff0000; }
+  .sub { font-size: 13px; color: #666; margin-bottom: 28px; line-height: 1.5; }
+  .step {
+    display: flex; gap: 14px; align-items: flex-start;
+    margin-bottom: 20px; padding: 14px 16px;
+    background: #111; border-radius: 10px; border: 1px solid #222;
+  }
+  .step-num {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: #ff0000; color: #fff; font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .step-num.done { background: #27ae60; }
+  .step-text { font-size: 13px; line-height: 1.5; color: #ccc; }
+  .step-text strong { color: #f0ede8; }
+  .file-row { margin: 6px 0 0; }
+  .file-row label {
+    display: inline-block; padding: 6px 14px; font-size: 12px; font-weight: 600;
+    background: #222; border: 1px solid #333; border-radius: 6px; cursor: pointer;
+    color: #aaa; transition: all 0.15s;
+  }
+  .file-row label:hover { background: #2a2a2a; color: #fff; }
+  .file-row input { display: none; }
+  .file-status { font-size: 11px; color: #555; margin-top: 4px; }
+  .file-status.ok { color: #27ae60; }
+  .file-status.err { color: #ff0000; }
+  .progress-bar {
+    height: 4px; background: #222; border-radius: 2px; margin: 20px 0 8px;
+    overflow: hidden; display: none;
+  }
+  .progress-bar.show { display: block; }
+  .progress-fill {
+    height: 100%; background: #ff0000; border-radius: 2px;
+    transition: width 0.3s; width: 0%;
+  }
+  .status-msg { font-size: 13px; color: #888; min-height: 20px; }
+  .status-msg.ok { color: #27ae60; }
+  .status-msg.err { color: #ff0000; }
+  .btn {
+    width: 100%; padding: 14px; margin-top: 20px;
+    background: #ff0000; color: #fff; border: none; border-radius: 10px;
+    font-size: 14px; font-weight: 600; cursor: pointer; letter-spacing: 0.03em;
+    transition: background 0.15s; opacity: 0.4; pointer-events: none;
+  }
+  .btn.ready { opacity: 1; pointer-events: all; }
+  .btn.ready:hover { background: #cc0000; }
+  .note {
+    font-size: 11px; color: #444; margin-top: 16px; line-height: 1.6;
+    border-top: 1px solid #222; padding-top: 16px;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>MeasurePDF <span>Offline Bundler</span></h1>
+  <p class="sub">Combines your app + pdf.js into one fully self-contained HTML file.<br>
+  The output file works <strong>100% offline</strong> on first visit — no internet ever needed.</p>
+
+  <!-- Step 1: Upload app -->
+  <div class="step" id="step1">
+    <div class="step-num" id="s1num">1</div>
+    <div class="step-text">
+      <strong>Upload MeasurePDF-fixed.zip or index.html</strong>
+      <div class="file-row">
+        <label>Choose file <input type="file" id="app-file" accept=".html,.zip"></label>
+      </div>
+      <div class="file-status" id="app-status">No file selected</div>
+    </div>
+  </div>
+
+  <!-- Step 2: Fetch pdf.js -->
+  <div class="step" id="step2">
+    <div class="step-num" id="s2num">2</div>
+    <div class="step-text">
+      <strong>Fetch pdf.js from CDN</strong><br>
+      <span id="fetch-status" style="color:#555;font-size:12px;">Waiting for step 1…</span>
+    </div>
+  </div>
+
+  <!-- Step 3: Bundle -->
+  <div class="step" id="step3">
+    <div class="step-num" id="s3num">3</div>
+    <div class="step-text">
+      <strong>Download bundled file</strong><br>
+      <span style="font-size:12px;color:#555;">One file, zero dependencies, works everywhere offline.</span>
+    </div>
+  </div>
+
+  <div class="progress-bar" id="progress-bar">
+    <div class="progress-fill" id="progress-fill"></div>
+  </div>
+  <div class="status-msg" id="status-msg"></div>
+  <button class="btn" id="bundle-btn" disabled>Bundle & Download</button>
+
+  <div class="note">
+    ℹ️ This bundler runs entirely in your browser. Your files never leave your device.
+    Run it once on any internet-connected device — the output works offline on all devices.
+  </div>
+</div>
+
+<script>
+var appHtml = null;
+var pdfMainText = null;
+var pdfWorkerText = null;
+
+var MAIN_URL   = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+var WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+function setStatus(msg, type) {
+  var el = document.getElementById('status-msg');
+  el.textContent = msg;
+  el.className = 'status-msg' + (type ? ' ' + type : '');
+}
+
+function setProgress(pct) {
+  document.getElementById('progress-bar').classList.add('show');
+  document.getElementById('progress-fill').style.width = pct + '%';
+}
+
+function checkReady() {
+  if (appHtml && pdfMainText && pdfWorkerText) {
+    document.getElementById('bundle-btn').classList.add('ready');
+    document.getElementById('bundle-btn').disabled = false;
+    document.getElementById('s3num').classList.add('done');
+    setStatus('Ready to bundle! Click the button below.', 'ok');
+  }
+}
+
+// ── Step 1: Read app file ──
+document.getElementById('app-file').addEventListener('change', function(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var statusEl = document.getElementById('app-status');
+  statusEl.textContent = 'Reading…';
+  statusEl.className = 'file-status';
+
+  if (file.name.endsWith('.zip')) {
+    // Unzip — use built-in DecompressionStream if available, else ask for .html
+    statusEl.textContent = 'Reading zip…';
+    file.arrayBuffer().then(function(buf) {
+      // Try DecompressionStream (Chrome 80+, Safari 16.4+)
+      // Simpler: use a plain ZIP parser for single-file zips
+      parseZip(buf, function(html, err) {
+        if (err || !html) {
+          statusEl.textContent = '⚠ Could not read zip. Please upload index.html directly.';
+          statusEl.className = 'file-status err';
+          return;
+        }
+        appHtml = html;
+        statusEl.textContent = '✓ index.html extracted from zip (' + Math.round(html.length/1024) + ' KB)';
+        statusEl.className = 'file-status ok';
+        document.getElementById('s1num').classList.add('done');
+        startFetch();
+      });
+    });
+  } else {
+    // Plain .html
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      appHtml = ev.target.result;
+      statusEl.textContent = '✓ ' + file.name + ' (' + Math.round(appHtml.length/1024) + ' KB)';
+      statusEl.className = 'file-status ok';
+      document.getElementById('s1num').classList.add('done');
+      startFetch();
+    };
+    reader.onerror = function() {
+      statusEl.textContent = 'Error reading file';
+      statusEl.className = 'file-status err';
+    };
+    reader.readAsText(file);
+  }
+});
+
+// ── Minimal ZIP parser (handles store + deflate, single or multi-file) ──
+function parseZip(buf, cb) {
+  try {
+    var bytes = new Uint8Array(buf);
+    // Scan for local file headers (PK\x03\x04)
+    var htmlContent = null;
+    var i = 0;
+    while (i < bytes.length - 4) {
+      if (bytes[i]===0x50 && bytes[i+1]===0x4B && bytes[i+2]===0x03 && bytes[i+3]===0x04) {
+        var method     = bytes[i+8]  | (bytes[i+9]  << 8);
+        var compSize   = bytes[i+18] | (bytes[i+19]<<8) | (bytes[i+20]<<16) | (bytes[i+21]<<24);
+        var uncompSize = bytes[i+22] | (bytes[i+23]<<8) | (bytes[i+24]<<16) | (bytes[i+25]<<24);
+        var fnLen      = bytes[i+26] | (bytes[i+27]<<8);
+        var exLen      = bytes[i+28] | (bytes[i+29]<<8);
+        var fnBytes    = bytes.slice(i+30, i+30+fnLen);
+        var fname      = new TextDecoder().decode(fnBytes);
+        var dataStart  = i + 30 + fnLen + exLen;
+        if (fname.endsWith('.html') || fname.endsWith('.htm')) {
+          var compData = bytes.slice(dataStart, dataStart + compSize);
+          if (method === 0) {
+            // Stored
+            htmlContent = new TextDecoder().decode(compData);
+          } else if (method === 8) {
+            // Deflated — use DecompressionStream
+            if (typeof DecompressionStream !== 'undefined') {
+              var ds = new DecompressionStream('deflate-raw');
+              var writer = ds.writable.getWriter();
+              var reader2 = ds.readable.getReader();
+              writer.write(compData);
+              writer.close();
+              var chunks = [];
+              function pump() {
+                return reader2.read().then(function(r) {
+                  if (r.done) {
+                    var total = chunks.reduce(function(s,c){return s+c.length;}, 0);
+                    var out = new Uint8Array(total); var off = 0;
+                    chunks.forEach(function(c){out.set(c,off);off+=c.length;});
+                    htmlContent = new TextDecoder().decode(out);
+                    cb(htmlContent, null);
+                  } else { chunks.push(r.value); return pump(); }
+                });
+              }
+              pump().catch(function(e){ cb(null, e); });
+              return;
+            } else {
+              cb(null, 'DecompressionStream not available — upload index.html directly');
+              return;
+            }
+          }
+          if (htmlContent) { cb(htmlContent, null); return; }
+        }
+        i = dataStart + compSize;
+      } else { i++; }
+    }
+    cb(htmlContent, htmlContent ? null : 'No HTML found in zip');
+  } catch(e) { cb(null, e); }
+}
+
+// ── Step 2: Fetch pdf.js ──
+function startFetch() {
+  var statusEl = document.getElementById('fetch-status');
+  statusEl.style.color = '#f39c12';
+  statusEl.textContent = 'Fetching pdf.min.js (~1.5 MB)…';
+  setProgress(5);
+  setStatus('Fetching pdf.js library…');
+
+  fetch(MAIN_URL)
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    })
+    .then(function(text) {
+      pdfMainText = text;
+      setProgress(55);
+      statusEl.textContent = '✓ pdf.min.js (' + Math.round(text.length/1024) + ' KB) — fetching worker…';
+      setStatus('Fetching pdf worker (~400 KB)…');
+      return fetch(WORKER_URL);
+    })
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    })
+    .then(function(text) {
+      pdfWorkerText = text;
+      setProgress(100);
+      document.getElementById('s2num').classList.add('done');
+      statusEl.style.color = '#27ae60';
+      statusEl.textContent = '✓ Both files fetched (' +
+        Math.round((pdfMainText.length + pdfWorkerText.length)/1024) + ' KB total)';
+      checkReady();
+    })
+    .catch(function(e) {
+      statusEl.style.color = '#ff0000';
+      statusEl.textContent = '✗ Fetch failed: ' + e.message + ' — check your connection';
+      setStatus('Fetch failed. Check internet connection and try again.', 'err');
+    });
+}
+
+// ── Step 3: Bundle & Download ──
+document.getElementById('bundle-btn').addEventListener('click', function() {
+  if (!appHtml || !pdfMainText || !pdfWorkerText) return;
+  setStatus('Bundling…');
+
+  try {
+    var html = appHtml;
+
+    // 1. Remove the offline-first loader (we're replacing it with inline scripts)
+    html = html.replace(
+      /<!-- OFFLINE-FIRST PDF\.JS LOADER -->[\s\S]*?<\/script>/,
+      '<!-- pdf.js inlined below -->'
+    );
+
+    // 2. Remove the CDN <script src=...pdf.min.js...> tag if still present
+    html = html.replace(
+      /<script[^>]+cdnjs\.cloudflare\.com[^>]+pdf\.min\.js[^>]*><\/script>/g,
+      ''
+    );
+    html = html.replace(
+      /<!-- pdf\.js loaded by offline-first loader below -->/g, ''
+    );
+
+    // 3. Inline pdf.min.js
+    //    Escape </script> inside the JS to avoid breaking the HTML parser
+    var safeMain   = pdfMainText.replace(/<\/script>/gi, '<\\/script>');
+    var safeWorker = pdfWorkerText.replace(/<\/script>/gi, '<\\/script>');
+
+    // 4. Inline worker as a blob URL set before app starts
+    var workerInline =
+      '<script id="pdfjs-worker-inline">\n' +
+      '(function(){\n' +
+      '  var wt=' + JSON.stringify(pdfWorkerText) + ';\n' +
+      '  try{\n' +
+      '    var b=new Blob([wt],{type:"application/javascript"});\n' +
+      '    window.__workerBlobUrl=URL.createObjectURL(b);\n' +
+      '  }catch(e){ window.__workerBlobUrl=null; }\n' +
+      '})();\n' +
+      '</script>\n';
+
+    // 5. Inline pdf.min.js
+    var mainInline = '<script id="pdfjs-main-inline">\n' + safeMain + '\n</script>\n';
+
+    // 6. Insert both before </head>
+    html = html.replace('</head>', workerInline + mainInline + '</head>');
+
+    // 7. Update __startApp to use the inlined worker
+    html = html.replace(
+      /pdfjsLib\.GlobalWorkerOptions\.workerSrc\s*=.*?;/g,
+      'pdfjsLib.GlobalWorkerOptions.workerSrc = window.__workerBlobUrl || "";'
+    );
+
+    // 8. Remove the offline loader calls from __startApp if present
+    html = html.replace(
+      /if\s*\(window\.__getWorkerUrl[\s\S]*?\}\s*\n/g, ''
+    );
+
+    // 9. Since pdf.js is now inline (loads synchronously), call __startApp immediately
+    //    Replace the "if pdfjsLib defined" guard with a direct call
+    html = html.replace(
+      "// If pdf.js already available (e.g. from HTTP cache), start immediately\nif (typeof pdfjsLib !== 'undefined') window.__startApp();",
+      "// pdf.js is inlined — start immediately\nif (window.__startApp) window.__startApp(); else window.addEventListener('load', function(){ if(window.__startApp) window.__startApp(); });"
+    );
+
+    // 10. Verify the result looks good
+    if (html.indexOf('pdfjsLib') === -1) {
+      setStatus('Bundle error: pdf.js not found in output', 'err');
+      return;
+    }
+
+    // 11. Download
+    var blob = new Blob([html], {type: 'text/html'});
+    var url  = URL.createObjectURL(blob);
+    var a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'MeasurePDF-offline.html';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
+
+    var finalKB = Math.round(html.length / 1024);
+    setStatus('✓ Downloaded MeasurePDF-offline.html (' + finalKB + ' KB) — fully self-contained!', 'ok');
+  } catch(e) {
+    setStatus('Bundle error: ' + e.message, 'err');
+  }
+});
+</script>
+</body>
+</html>
