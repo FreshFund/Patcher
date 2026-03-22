@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MeasurePDF iOS Patcher v4</title>
+<title>MeasurePDF iOS Patcher v5</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -15,37 +15,38 @@ body {
   width: 100%; max-width: 380px; background: #1a1a1a; border: 1px solid #2a2a2a;
   border-radius: 20px; padding: 28px 24px; display: flex; flex-direction: column; gap: 20px;
 }
-.logo { width:44px; height:44px; background:#ff0000; border-radius:12px; display:flex; align-items:center; justify-content:center; }
+.logo { width:44px;height:44px;background:#ff0000;border-radius:12px;display:flex;align-items:center;justify-content:center; }
 h1 { font-size:18px; font-weight:600; }
 h1 span { color:#ff0000; }
 p.sub { font-size:13px; color:#666; line-height:1.6; }
 .pick-wrap { position:relative; width:100%; height:52px; }
 .pick-face {
-  position:absolute; inset:0; background:#ff0000; color:#fff; border:none; border-radius:14px;
-  font-size:16px; font-weight:600; display:flex; align-items:center; justify-content:center; gap:8px;
+  position:absolute;inset:0;background:#ff0000;color:#fff;border:none;border-radius:14px;
+  font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;
   pointer-events:none;
 }
 .pick-wrap:active .pick-face { background:#cc0000; }
-#file-input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; font-size:16px; }
+#file-input { position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:16px; }
 .log {
-  background:#111; border:1px solid #2a2a2a; border-radius:12px; padding:14px;
-  font-family:'SF Mono',Menlo,monospace; font-size:12px; line-height:1.8; color:#888;
-  display:none; max-height:280px; overflow-y:auto; white-space:pre-wrap; word-break:break-all;
+  background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:14px;
+  font-family:'SF Mono',Menlo,monospace;font-size:12px;line-height:1.8;color:#888;
+  display:none;max-height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;
 }
 .log.show { display:block; }
 .ok  { color:#27ae60; }
 .err { color:#e74c3c; }
+.warn{ color:#f39c12; }
 .info{ color:#3498db; }
 #dl-btn {
-  display:none; width:100%; height:52px; background:#27ae60; color:#fff; border:none;
-  border-radius:14px; font-size:16px; font-weight:600; align-items:center; justify-content:center;
-  gap:8px; cursor:pointer; -webkit-tap-highlight-color:transparent;
+  display:none;width:100%;height:52px;background:#27ae60;color:#fff;border:none;
+  border-radius:14px;font-size:16px;font-weight:600;align-items:center;justify-content:center;
+  gap:8px;cursor:pointer;-webkit-tap-highlight-color:transparent;
 }
 #dl-btn.show { display:flex; }
 #dl-btn:active { background:#219a52; }
-.steps { background:#111; border:1px solid #2a2a2a; border-radius:12px; padding:14px; font-size:12px; color:#888; line-height:2; display:none; }
+.steps { background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:14px;font-size:12px;color:#888;line-height:2;display:none; }
 .steps.show { display:block; }
-.note { font-size:11px; color:#444; text-align:center; }
+.note { font-size:11px;color:#444;text-align:center; }
 </style>
 </head>
 <body>
@@ -57,41 +58,34 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   </div>
   <div>
     <h1>Modern <span>Measure</span></h1>
-    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v4</h1>
+    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v5</h1>
   </div>
-  <p class="sub">11 iOS-only patches: throbber, 1.0× render, batched extraction, single-path overlay, rAF redraws, cached layout, deferred restore, page cleanup, canvas recovery, free PDF bytes. Desktop/Android untouched.</p>
+  <p class="sub">Use your <strong style="color:#f0ede8">original</strong> canvas.html — never a previously patched file.</p>
 
   <div class="pick-wrap">
     <div class="pick-face">
-      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-        <path d="M3 13v4h14v-4M10 3v10M6 7l4-4 4 4"/>
-      </svg>
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 13v4h14v-4M10 3v10M6 7l4-4 4 4"/></svg>
       Choose canvas.html
     </div>
     <input type="file" id="file-input" accept=".html,text/html">
   </div>
 
   <div class="log" id="log"></div>
-
   <button id="dl-btn">
-    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-      <path d="M3 13v4h14v-4M10 3v10M6 7l4-4 4 4"/>
-    </svg>
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 13v4h14v-4M10 3v10M6 7l4-4 4 4"/></svg>
     Save canvas_ios.html
   </button>
-
   <div class="steps" id="steps">
     <div style="color:#f0ede8;font-weight:600;margin-bottom:4px;">To save on iPhone:</div>
     <div>1. Tap <b style="color:#f0ede8">Save canvas_ios.html</b> above</div>
     <div>2. Tap the <b style="color:#f0ede8">Share</b> icon (box ↑ arrow)</div>
     <div>3. Tap <b style="color:#f0ede8">Save to Files</b></div>
   </div>
-
   <p class="note">Runs entirely on-device. Your file never leaves your phone.</p>
 </div>
 
 <script>
-var inp   = document.getElementById('file-input');
+var inp = document.getElementById('file-input');
 var logEl = document.getElementById('log');
 var dlBtn = document.getElementById('dl-btn');
 var steps = document.getElementById('steps');
@@ -108,23 +102,31 @@ function log(msg, cls) {
 
 inp.addEventListener('change', function() {
   var file = this.files && this.files[0];
-  logEl.innerHTML = ''; logEl.classList.add('show');
-  dlBtn.classList.remove('show'); steps.classList.remove('show');
+  logEl.innerHTML = '';
+  dlBtn.classList.remove('show');
+  steps.classList.remove('show');
   patchedSrc = null;
-  if (!file) { log('No file selected.', 'err'); return; }
+  if (!file) return;
   log('Reading ' + file.name + ' (' + Math.round(file.size/1024) + ' KB)…', 'info');
   var reader = new FileReader();
-  reader.onerror = function() { log('Read error: ' + reader.error, 'err'); };
+  reader.onerror = function() { log('Read error', 'err'); };
   reader.onload = function() {
     var src = reader.result;
-    log(Math.round(src.length/1024) + ' KB loaded. Patching…', 'info');
-    if (src.indexOf('const renderScale=2.0;') === -1)
-      log('⚠ renderScale=2.0 not found — may be already patched or wrong file', 'err');
+    log(Math.round(src.length/1024) + ' KB loaded.', 'info');
+
+    // Guard: already patched?
+    if (src.indexOf('const isIOS=') !== -1) {
+      log('⚠ This file already has iOS patches — use the ORIGINAL canvas.html', 'warn');
+    }
+    if (src.indexOf('const renderScale=2.0;') === -1) {
+      log('⚠ renderScale=2.0 not found — may be wrong file or already patched', 'warn');
+    }
+
     var r = applyPatches(src);
     log('');
     log(r.fail === 0
-      ? '✓ All ' + r.ok + ' patches applied successfully!'
-      : r.ok + ' applied, ' + r.fail + ' FAILED', r.fail===0?'ok':'err');
+      ? '✓ All ' + r.ok + ' patches applied!'
+      : r.ok + ' applied, ' + r.fail + ' failed', r.fail === 0 ? 'ok' : 'err');
     patchedSrc = r.src;
     dlBtn.classList.add('show');
     steps.classList.add('show');
@@ -148,287 +150,200 @@ dlBtn.addEventListener('click', function() {
   }
 });
 
-// ════════════════════════════════════════════════════════════
-// PATCH DEFINITIONS
-// All strings use exact whitespace from the original canvas.html
-// ════════════════════════════════════════════════════════════
-
-// P1: Throbber CSS — injected before last </style>
-var CSS_PATCH = [
-  '  /* ── iOS LOADING THROBBER ── */',
-  '  #ios-throbber{position:fixed;inset:0;z-index:600;background:rgba(10,10,10,0.88);display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}',
-  '  #ios-throbber.show{display:flex;}',
-  '  #ios-throbber-spinner{width:44px;height:44px;border:3px solid rgba(255,255,255,0.12);border-top-color:var(--accent);border-radius:50%;animation:ios-spin 0.8s linear infinite;}',
-  '  @keyframes ios-spin{to{transform:rotate(360deg);}}',
-  '  #ios-throbber-label{font-family:\'DM Mono\',monospace;font-size:12px;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;}',
-  ''
-].join('\n');
-
-// P2: Throbber HTML — injected before <!-- SPLASH / ACCESS GATE -->
-var HTML_PATCH = [
-  '<!-- iOS LOADING THROBBER -->',
-  '<div id="ios-throbber"><div id="ios-throbber-spinner"></div><div id="ios-throbber-label">Loading page…</div></div>',
-  ''
-].join('\n');
-
-// P3: isIOS detection + renderScale override
-var P3_OLD = 'const renderScale=2.0;';
-var P3_NEW = [
-  'const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform===\'MacIntel\'&&navigator.maxTouchPoints>1);',
-  'const renderScale=isIOS?1.0:2.0;'
-].join('\n');
-
-// P4: Throbber JS helpers + canvas recovery — injected after workerSrc line
-var P4_ANCHOR = "pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';";
-var P4_INJECT = [
-  '',
-  '// ── iOS THROBBER + CANVAS RECOVERY ──',
-  "const _throbberEl=document.getElementById('ios-throbber'),_throbberLbl=document.getElementById('ios-throbber-label');",
-  "function showThrobber(msg){if(!isIOS)return;if(_throbberEl){_throbberEl.classList.add('show');if(_throbberLbl&&msg)_throbberLbl.textContent=msg;}}",
-  "function hideThrobber(){if(_throbberEl)_throbberEl.classList.remove('show');}",
-  'if(isIOS){',
-  "  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible'&&pdfDoc)requestAnimationFrame(function(){renderPage(currentPage);});});",
-  "  var _pc=document.getElementById('pdf-canvas');",
-  "  if(_pc){_pc.addEventListener('contextlost',function(e){e.preventDefault();});_pc.addEventListener('contextrestored',function(){if(pdfDoc)renderPage(currentPage);});}",
-  '}',
-  ''
-].join('\n');
-
-// P5: iOS-aware renderPage — replaces the entire function
-var P5_OLD = [
-  'function renderPage(num, reset=false) {',
-  '  pdfDoc.getPage(num).then(page => {',
-  '    const vp = page.getViewport({ scale: renderScale });',
-  '    pdfCanvas.width=vp.width; pdfCanvas.height=vp.height;',
-  "    svgOverlay.setAttribute('width', vp.width);",
-  "    svgOverlay.setAttribute('height', vp.height);",
-  "    touchLayer.style.width=vp.width+'px';",
-  "    touchLayer.style.height=vp.height+'px';",
-  "    page.render({ canvasContext: pdfCanvas.getContext('2d'), viewport: vp }).promise.then(() => {",
-  '      if (reset) {',
-  '        fitToScreen();',
-  '        // Try to restore session for this filename',
-  '        loadSession(currentFilename);',
-  '        // Default to select mode on fresh load',
-  '        if (!mode) {',
-  "          mode = 'select';",
-  "          selectBtn.classList.add('active');",
-  '        }',
-  '      }',
-  '      redrawOverlay();',
-  '      pagePill.textContent=`${num}/${totalPages}`;',
-  '      // Extract CAD geometry for snapping (async, non-blocking)',
-  '      extractPageGeometry(page, vp).then(() => {',
-  '              if (pageSegments.length > 0) {',
-  '          if (snapEnabled) drawGeometryOverlay();',
-  '        }',
-  '      });',
-  '    });',
-  '  });',
-  '}'
-].join('\n');
-
-var P5_NEW = [
-  'function renderPage(num, reset=false) {',
-  '  if(isIOS)showThrobber(\'Loading page…\');',
-  '  pdfDoc.getPage(num).then(page => {',
-  '    const vp = page.getViewport({ scale: renderScale });',
-  '    pdfCanvas.width=vp.width; pdfCanvas.height=vp.height;',
-  "    svgOverlay.setAttribute('width', vp.width);",
-  "    svgOverlay.setAttribute('height', vp.height);",
-  "    touchLayer.style.width=vp.width+'px';",
-  "    touchLayer.style.height=vp.height+'px';",
-  "    page.render({ canvasContext: pdfCanvas.getContext('2d'), viewport: vp }).promise.then(() => {",
-  '      if (reset) {',
-  '        fitToScreen();',
-  '        loadSession(currentFilename);',
-  '        if (!mode) { mode=\'select\'; selectBtn.classList.add(\'active\'); }',
-  '      }',
-  '      redrawOverlay();',
-  '      pagePill.textContent=`${num}/${totalPages}`;',
-  '      if(isIOS){',
-  '        extractPageGeometryIOS(page,vp).then(()=>{',
-  '          hideThrobber();',
-  '          if(pageSegments.length>0&&snapEnabled)drawGeometryOverlayIOS();',
-  '          page.cleanup();',
-  '        }).catch(()=>{hideThrobber();page.cleanup();});',
-  '      }else{',
-  '        extractPageGeometry(page, vp).then(() => {',
-  '              if (pageSegments.length > 0) {',
-  '          if (snapEnabled) drawGeometryOverlay();',
-  '        }',
-  '        });',
-  '      }',
-  '    });',
-  '  });',
-  '}'
-].join('\n');
-
-// P6: Batched iOS extractor + single-path overlay
-// Injected after the closing of extractPageGeometry:  "  } catch(e) {\n  }\n\n}\n"
-var P6_ANCHOR = '  } catch(e) {\n  }\n\n}\n';
-var P6_INJECT = [
-  '',
-  'async function extractPageGeometryIOS(page,viewport){',
-  '  pageSegments=[];snapGrid=null;',
-  '  const vt=viewport.transform;',
-  "  function cc(c,m){return[c[0]*m[0]+c[2]*m[1],c[1]*m[0]+c[3]*m[1],c[0]*m[2]+c[2]*m[3],c[1]*m[2]+c[3]*m[3],c[0]*m[4]+c[2]*m[5]+c[4],c[1]*m[4]+c[3]*m[5]+c[5]];}",
-  '  function mh(ctm){function pc(px,py){const x=ctm[0]*px+ctm[2]*py+ctm[4],y=ctm[1]*px+ctm[3]*py+ctm[5];return{x:vt[0]*x+vt[2]*y+vt[4],y:vt[1]*x+vt[3]*y+vt[5]};}function ps(ax,ay,bx,by){const p1=pc(ax,ay),p2=pc(bx,by);if(Math.hypot(p2.x-p1.x,p2.y-p1.y)>=2)pageSegments.push({x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,isCurve:false});}return{pdfToCanvas:pc,pushSeg:ps};}',
-  '  function yu(){return new Promise(r=>setTimeout(r,0));}',
-  '  try{',
-  '    const ops=await page.getOperatorList(),fn=ops.fnArray,ar=ops.argsArray;',
-  '    const B=30;',
-  '    let ctm=[1,0,0,1,0,0];const st=[ctm];',
-  '    for(let i=0;i<fn.length;i++){',
-  '      if(i>0&&i%B===0)await yu();',
-  '      const f=fn[i],a=ar[i];',
-  '      if(f===_OPC.save)st.push([...ctm]);',
-  '      else if(f===_OPC.restore){if(st.length>1)ctm=st.pop();}',
-  '      else if(f===_OPC.transform)ctm=cc(ctm,a);',
-  "      else if(f===_OPC.paintFormXObjectBegin){st.push([...ctm]);if(a&&Array.isArray(a[1])&&a[1].length===6)ctm=cc(ctm,a[1]);}",
-  '      else if(f===_OPC.paintFormXObjectEnd){if(st.length>1)ctm=st.pop();}',
-  '      else if(f===_OPC.constructPath){const{pdfToCanvas,pushSeg}=mh(ctm);decodeConstructPath(a[0],a[1],pdfToCanvas,pushSeg);if(pageSegments.length%200===0)await yu();}',
-  '    }',
-  '    await yu();',
-  '    const seen=new Set(),deduped=[];',
-  '    for(let i=0;i<pageSegments.length;i++){',
-  '      if(i%500===0)await yu();',
-  "      const s=pageSegments[i];const k=Math.round(s.x1)+','+Math.round(s.y1)+','+Math.round(s.x2)+','+Math.round(s.y2);const r=Math.round(s.x2)+','+Math.round(s.y2)+','+Math.round(s.x1)+','+Math.round(s.y1);",
-  '      if(!seen.has(k)&&!seen.has(r)){seen.add(k);deduped.push(s);}',
-  '    }',
-  '    pageSegments=deduped;',
-  '    await yu();',
-  '    snapGrid=buildSnapGrid(pageSegments);',
-  '    await yu();',
-  "  }catch(e){console.warn('[iOS]',e);}",
-  '}',
-  '',
-  'function drawGeometryOverlayIOS(){',
-  '  clearGeometryOverlay();',
-  "  var _g=document.getElementById('_iosGeoSvg');",
-  '  if(!_g){',
-  "    _g=document.createElementNS('http://www.w3.org/2000/svg','svg');",
-  "    _g.id='_iosGeoSvg';",
-  "    _g.style.cssText='position:absolute;top:0;left:0;pointer-events:none;overflow:visible;';",
-  '    svgOverlay.parentNode.insertBefore(_g,svgOverlay);',
-  '  }',
-  "  _g.setAttribute('width',svgOverlay.getAttribute('width'));",
-  "  _g.setAttribute('height',svgOverlay.getAttribute('height'));",
-  "  if(!pageSegments||!pageSegments.length){_g.innerHTML='';return;}",
-  "  var d=pageSegments.map(function(s){return'M'+s.x1+','+s.y1+'L'+s.x2+','+s.y2;}).join('');",
-  '  _g.innerHTML=\'<path d="\'+d+\'" stroke="rgba(0,120,255,0.25)" stroke-width="0.5" fill="none" pointer-events="none"/>\';',
-  '}',
-  ''
-].join('\n');
-
-// P7: rAF-debounce redrawOverlay — injected before screenToCanvas
-var P7_ANCHOR = 'function screenToCanvas(sx,sy) {\n  const r=canvasViewport.getBoundingClientRect();\n  return { x:(sx-r.left-panX)/zoom, y:(sy-r.top-panY)/zoom };\n}';
-var P7_INJECT = [
-  '// ── iOS: rAF-debounce redrawOverlay ──',
-  'if (isIOS) {',
-  '  var _origRO = redrawOverlay; var _roRaf = null;',
-  '  redrawOverlay = function() {',
-  '    if (_roRaf) cancelAnimationFrame(_roRaf);',
-  '    _roRaf = requestAnimationFrame(function() { _roRaf = null; _origRO(); });',
-  '  };',
-  '}',
-  ''
-].join('\n');
-
-// P8: Cache getBoundingClientRect — replaces screenToCanvas
-var P8_OLD = 'function screenToCanvas(sx,sy) {\n  const r=canvasViewport.getBoundingClientRect();\n  return { x:(sx-r.left-panX)/zoom, y:(sy-r.top-panY)/zoom };\n}';
-var P8_NEW = [
-  'var _cachedVpRect = null;',
-  "window.addEventListener('resize', function() { _cachedVpRect = null; }, {passive:true});",
-  "window.addEventListener('orientationchange', function() { _cachedVpRect = null; }, {passive:true});",
-  'function screenToCanvas(sx,sy) {',
-  '  const r = isIOS',
-  '    ? (_cachedVpRect || (_cachedVpRect = canvasViewport.getBoundingClientRect()))',
-  '    : canvasViewport.getBoundingClientRect();',
-  '  return { x:(sx-r.left-panX)/zoom, y:(sy-r.top-panY)/zoom };',
-  '}'
-].join('\n');
-
-// P9: Defer auto-restore on iOS
-// EXACT text from source (multi-line):
-var P9_OLD = '      if(bytes){\n        loadSessionFromStore(latest.filename);\n      }';
-var P9_NEW = [
-  '      if(bytes){',
-  '        if(isIOS){',
-  "          document.addEventListener('pointerdown',function _r(){",
-  "            document.removeEventListener('pointerdown',_r);",
-  '            loadSessionFromStore(latest.filename);',
-  '          },{once:true,passive:true});',
-  '        } else {',
-  '          loadSessionFromStore(latest.filename);',
-  '        }',
-  '      }'
-].join('\n');
-
-// P10: Free PDF bytes after IDB save
-var P10_OLD = '      tx.oncomplete=()=>res(true);\n      tx.onerror=e=>rej(e.target.error);';
-var P10_NEW = [
-  '      tx.oncomplete=()=>{',
-  '        if(isIOS){ currentPdfBytes=null; } // iOS: free main-thread copy',
-  '        res(true);',
-  '      };',
-  '      tx.onerror=e=>rej(e.target.error);'
-].join('\n');
-
-// ════════════════════════════════════════════════════════════
-// APPLY PATCHES
-// ════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════
+// PATCHES
+// ════════════════════════════════════════════════════
 
 function applyPatches(src) {
   var ok = 0, fail = 0;
 
-  function patch(anchor, replacement, tag, mode) {
+  // safe replace — only replaces if anchor found exactly once
+  function patch(anchor, replacement, tag) {
     var idx = src.indexOf(anchor);
-    if (idx !== -1) {
-      if (mode === 'before') src = src.slice(0,idx) + replacement + src.slice(idx);
-      else if (mode === 'after') src = src.slice(0,idx+anchor.length) + replacement + src.slice(idx+anchor.length);
-      else src = src.slice(0,idx) + replacement + src.slice(idx+anchor.length);
-      log('✓  ' + tag, 'ok'); ok++;
-    } else {
-      log('✗  ' + tag + ' — anchor not found', 'err'); fail++;
-    }
+    if (idx === -1) { log('✗  ' + tag + ' — anchor not found', 'err'); fail++; return; }
+    src = src.slice(0, idx) + replacement + src.slice(idx + anchor.length);
+    log('✓  ' + tag, 'ok'); ok++;
+  }
+  function patchBefore(anchor, inject, tag) {
+    patch(anchor, inject + anchor, tag);
+  }
+  function patchAfter(anchor, inject, tag) {
+    patch(anchor, anchor + inject, tag);
   }
 
-  // P1: Throbber CSS (before last </style>)
-  var si = src.lastIndexOf('</style>');
-  if (si !== -1) {
-    src = src.slice(0,si) + CSS_PATCH + src.slice(si);
+  // ── P1: isIOS detection + renderScale 1.0 ──────────────────────
+  patch(
+    'const renderScale=2.0;',
+    'const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform===\'MacIntel\'&&navigator.maxTouchPoints>1);\nconst renderScale=isIOS?1.0:2.0;',
+    'isIOS + renderScale 1.0 (was 2.0)'
+  );
+
+  // ── P2: Throbber CSS ────────────────────────────────────────────
+  var lastStyle = src.lastIndexOf('</style>');
+  if (lastStyle !== -1) {
+    var css = [
+      '  /* iOS throbber */',
+      '  #ios-throbber{position:fixed;inset:0;z-index:600;background:rgba(10,10,10,0.88);',
+      '    display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;',
+      '    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}',
+      '  #ios-throbber.show{display:flex;}',
+      '  #ios-throbber-spinner{width:44px;height:44px;border:3px solid rgba(255,255,255,0.12);',
+      '    border-top-color:#ff0000;border-radius:50%;animation:ios-spin 0.8s linear infinite;}',
+      '  @keyframes ios-spin{to{transform:rotate(360deg);}}',
+      '  #ios-throbber-msg{font-family:\'DM Mono\',monospace;font-size:11px;color:#666;',
+      '    letter-spacing:0.08em;text-transform:uppercase;}',
+      ''
+    ].join('\n');
+    src = src.slice(0, lastStyle) + css + src.slice(lastStyle);
     log('✓  Throbber CSS', 'ok'); ok++;
   } else { log('✗  Throbber CSS — no </style>', 'err'); fail++; }
 
-  // P2: Throbber HTML
-  patch('<!-- SPLASH / ACCESS GATE -->', HTML_PATCH + '<!-- SPLASH / ACCESS GATE -->', 'Throbber HTML');
+  // ── P3: Throbber HTML ───────────────────────────────────────────
+  patchBefore(
+    '<!-- SPLASH / ACCESS GATE -->',
+    '<!-- iOS throbber -->\n<div id="ios-throbber"><div id="ios-throbber-spinner"></div><div id="ios-throbber-msg">Loading…</div></div>\n\n',
+    'Throbber HTML'
+  );
 
-  // P3: isIOS + renderScale
-  patch(P3_OLD, P3_NEW, 'isIOS + renderScale 1.0 (was 2.0)');
+  // ── P4: iOS helper functions (after workerSrc) ──────────────────
+  // These are injected as a self-contained block — safe even if isIOS is false
+  var workerLine = "pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';";
+  patchAfter(workerLine,
+    '\n\n// ── iOS helpers ──\nvar _iosThrobber=null,_iosThrobberMsg=null;\n' +
+    'function _initThrobber(){if(_iosThrobber)return;_iosThrobber=document.getElementById(\'ios-throbber\');_iosThrobberMsg=document.getElementById(\'ios-throbber-msg\');}\n' +
+    'function showThrobber(msg){if(!isIOS)return;_initThrobber();if(_iosThrobber)_iosThrobber.classList.add(\'show\');if(_iosThrobberMsg&&msg)_iosThrobberMsg.textContent=msg;}\n' +
+    'function hideThrobber(){_initThrobber();if(_iosThrobber)_iosThrobber.classList.remove(\'show\');}\n' +
+    'if(isIOS){\n' +
+    '  document.addEventListener(\'visibilitychange\',function(){\n' +
+    '    if(document.visibilityState===\'visible\'&&pdfDoc)renderPage(currentPage);\n' +
+    '  });\n' +
+    '  window.addEventListener(\'pageshow\',function(e){\n' +
+    '    if(e.persisted&&pdfDoc)renderPage(currentPage);\n' +
+    '  });\n' +
+    '}\n',
+    'iOS helpers + visibility recovery'
+  );
 
-  // P4: Throbber JS + canvas recovery (after workerSrc)
-  patch(P4_ANCHOR, P4_ANCHOR + P4_INJECT, 'Throbber JS + canvas recovery');
+  // ── P5: Batched geometry extractor for iOS ──────────────────────
+  // Injected after the existing extractPageGeometry function
+  var afterExtractor = '  } catch(e) {\n  }\n\n}\n';
+  patchAfter(afterExtractor,
+    '\n// ── iOS batched geometry extractor ──\n' +
+    'async function extractPageGeometryIOS(page,viewport){\n' +
+    '  pageSegments=[];snapGrid=null;\n' +
+    '  var vt=viewport.transform;\n' +
+    '  function cc(c,m){return[c[0]*m[0]+c[2]*m[1],c[1]*m[0]+c[3]*m[1],c[0]*m[2]+c[2]*m[3],c[1]*m[2]+c[3]*m[3],c[0]*m[4]+c[2]*m[5]+c[4],c[1]*m[4]+c[3]*m[5]+c[5]];}\n' +
+    '  function mh(ctm){\n' +
+    '    function pc(px,py){var x=ctm[0]*px+ctm[2]*py+ctm[4],y=ctm[1]*px+ctm[3]*py+ctm[5];return{x:vt[0]*x+vt[2]*y+vt[4],y:vt[1]*x+vt[3]*y+vt[5]};}\n' +
+    '    function ps(ax,ay,bx,by){var p1=pc(ax,ay),p2=pc(bx,by);if(Math.hypot(p2.x-p1.x,p2.y-p1.y)>=2)pageSegments.push({x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,isCurve:false});}\n' +
+    '    return{pdfToCanvas:pc,pushSeg:ps};\n' +
+    '  }\n' +
+    '  function yn(){return new Promise(function(r){setTimeout(r,0);});}\n' +
+    '  try{\n' +
+    '    var ops=await page.getOperatorList(),fn=ops.fnArray,ar=ops.argsArray;\n' +
+    '    var ctm=[1,0,0,1,0,0],st=[ctm.slice()];\n' +
+    '    for(var i=0;i<fn.length;i++){\n' +
+    '      if(i%40===0)await yn();\n' +
+    '      var f=fn[i],a=ar[i];\n' +
+    '      if(f===_OPC.save)st.push(ctm.slice());\n' +
+    '      else if(f===_OPC.restore){if(st.length>1)ctm=st.pop();}\n' +
+    '      else if(f===_OPC.transform)ctm=cc(ctm,a);\n' +
+    '      else if(f===_OPC.paintFormXObjectBegin){st.push(ctm.slice());if(a&&Array.isArray(a[1])&&a[1].length===6)ctm=cc(ctm,a[1]);}\n' +
+    '      else if(f===_OPC.paintFormXObjectEnd){if(st.length>1)ctm=st.pop();}\n' +
+    '      else if(f===_OPC.constructPath){\n' +
+    '        var h=mh(ctm);decodeConstructPath(a[0],a[1],h.pdfToCanvas,h.pushSeg);\n' +
+    '        if(pageSegments.length%300===0)await yn();\n' +
+    '      }\n' +
+    '    }\n' +
+    '    await yn();\n' +
+    '    var seen=new Set(),dd=[];\n' +
+    '    for(var j=0;j<pageSegments.length;j++){\n' +
+    '      if(j%500===0)await yn();\n' +
+    '      var s=pageSegments[j];\n' +
+    '      var k=Math.round(s.x1)+\',\'+Math.round(s.y1)+\',\'+Math.round(s.x2)+\',\'+Math.round(s.y2);\n' +
+    '      var r=Math.round(s.x2)+\',\'+Math.round(s.y2)+\',\'+Math.round(s.x1)+\',\'+Math.round(s.y1);\n' +
+    '      if(!seen.has(k)&&!seen.has(r)){seen.add(k);dd.push(s);}\n' +
+    '    }\n' +
+    '    pageSegments=dd;await yn();\n' +
+    '    snapGrid=buildSnapGrid(pageSegments);\n' +
+    '  }catch(e){console.warn(\'[iOS snap]\',e);}\n' +
+    '}\n',
+    'iOS batched extractor'
+  );
 
-  // P5: iOS-aware renderPage
-  patch(P5_OLD, P5_NEW, 'renderPage → iOS-aware');
+  // ── P6: Update renderPage to use iOS batched extractor ──────────
+  // Replaces only the extractPageGeometry call at the end of renderPage
+  var oldExtractCall = [
+    '      extractPageGeometry(page, vp).then(() => {',
+    '              if (pageSegments.length > 0) {',
+    '          if (snapEnabled) drawGeometryOverlay();',
+    '        }',
+    '      });'
+  ].join('\n');
+  var newExtractCall = [
+    '      if(isIOS){',
+    '        showThrobber(\'Indexing…\');',
+    '        extractPageGeometryIOS(page,vp).then(function(){',
+    '          hideThrobber();',
+    '          if(pageSegments.length>0&&snapEnabled)drawGeometryOverlay();',
+    '          try{page.cleanup();}catch(e){}',
+    '        }).catch(function(e){console.warn(e);hideThrobber();});',
+    '      } else {',
+    '        extractPageGeometry(page, vp).then(() => {',
+    '              if (pageSegments.length > 0) {',
+    '          if (snapEnabled) drawGeometryOverlay();',
+    '        }',
+    '        });',
+    '      }'
+  ].join('\n');
+  patch(oldExtractCall, newExtractCall, 'renderPage → iOS batched extractor');
 
-  // P6: Batched extractor + single-path overlay
-  patch(P6_ANCHOR, P6_ANCHOR + P6_INJECT, 'extractPageGeometryIOS + overlay');
+  // ── P7: rAF-debounce redrawOverlay on iOS ───────────────────────
+  var screenToCanvasFn = 'function screenToCanvas(sx,sy) {\n  const r=canvasViewport.getBoundingClientRect();\n  return { x:(sx-r.left-panX)/zoom, y:(sy-r.top-panY)/zoom };\n}';
+  patchBefore(screenToCanvasFn,
+    '// iOS: throttle redrawOverlay with rAF\n' +
+    'if(isIOS){\n' +
+    '  var _origRedraw=redrawOverlay,_raf=null;\n' +
+    '  redrawOverlay=function(){if(_raf)cancelAnimationFrame(_raf);_raf=requestAnimationFrame(function(){_raf=null;_origRedraw();});};\n' +
+    '}\n\n',
+    'rAF-debounce redrawOverlay (iOS)'
+  );
 
-  // P7: rAF-debounce (before screenToCanvas)
-  patch(P7_ANCHOR, P7_INJECT + P7_ANCHOR, 'rAF-debounce redrawOverlay (iOS)');
+  // ── P8: Cache getBoundingClientRect on iOS ──────────────────────
+  patch(
+    'function screenToCanvas(sx,sy) {\n  const r=canvasViewport.getBoundingClientRect();\n  return { x:(sx-r.left-panX)/zoom, y:(sy-r.top-panY)/zoom };\n}',
+    'var _vpRect=null;\n' +
+    'window.addEventListener(\'resize\',function(){_vpRect=null;},{passive:true});\n' +
+    'window.addEventListener(\'orientationchange\',function(){_vpRect=null;},{passive:true});\n' +
+    'function screenToCanvas(sx,sy){\n' +
+    '  var r=isIOS?(_vpRect||(_vpRect=canvasViewport.getBoundingClientRect())):canvasViewport.getBoundingClientRect();\n' +
+    '  return{x:(sx-r.left-panX)/zoom,y:(sy-r.top-panY)/zoom};\n' +
+    '}',
+    'Cache getBoundingClientRect (iOS)'
+  );
 
-  // P8: Cache getBoundingClientRect (replaces screenToCanvas)
-  patch(P8_OLD, P8_NEW, 'Cache getBoundingClientRect (iOS)');
+  // ── P9: Defer auto-restore on iOS ───────────────────────────────
+  // Try two possible anchor formats (single-line and multi-line)
+  var p9a = 'if(bytes){ loadSessionFromStore(latest.filename); }';
+  var p9b = '      if(bytes){\n        loadSessionFromStore(latest.filename);\n      }';
+  var p9new_a = 'if(bytes){\n        if(isIOS){document.addEventListener(\'pointerdown\',function _r(){document.removeEventListener(\'pointerdown\',_r);loadSessionFromStore(latest.filename);},{once:true,passive:true});}else{loadSessionFromStore(latest.filename);}\n      }';
+  var p9new_b = '      if(bytes){\n        if(isIOS){document.addEventListener(\'pointerdown\',function _r(){document.removeEventListener(\'pointerdown\',_r);loadSessionFromStore(latest.filename);},{once:true,passive:true});}else{loadSessionFromStore(latest.filename);}\n      }';
+  if (src.indexOf(p9a) !== -1) {
+    patch(p9a, p9new_a, 'Defer auto-restore until first tap (iOS)');
+  } else if (src.indexOf(p9b) !== -1) {
+    patch(p9b, p9new_b, 'Defer auto-restore until first tap (iOS)');
+  } else {
+    log('✗  Defer auto-restore — anchor not found', 'err'); fail++;
+  }
 
-  // P9: Defer auto-restore
-  patch(P9_OLD, P9_NEW, 'Defer auto-restore until first tap (iOS)');
+  // ── P10: Free PDF bytes after save ──────────────────────────────
+  patch(
+    'tx.oncomplete=()=>res(true);\n      tx.onerror=e=>rej(e.target.error);',
+    'tx.oncomplete=()=>{if(isIOS){currentPdfBytes=null;}res(true);};\n      tx.onerror=e=>rej(e.target.error);',
+    'Free PDF bytes after IDB save (iOS)'
+  );
 
-  // P10: Free PDF bytes
-  patch(P10_OLD, P10_NEW, 'Free PDF bytes from main thread (iOS)');
-
-  return { src: src, ok: ok, fail: fail };
+  return {src: src, ok: ok, fail: fail};
 }
 </script>
 </body>
