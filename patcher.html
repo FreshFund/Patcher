@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MeasurePDF iOS Patcher v8</title>
+<title>MeasurePDF iOS Patcher v9</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -29,7 +29,7 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
 .log {
   background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:14px;
   font-family:'SF Mono',Menlo,monospace;font-size:12px;line-height:1.8;color:#888;
-  display:none;max-height:300px;overflow-y:auto;
+  display:none;max-height:320px;overflow-y:auto;
 }
 .log.show { display:block; }
 .ok   { color:#27ae60; }
@@ -57,13 +57,15 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   </div>
   <div>
     <h1>Modern <span>Measure</span></h1>
-    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v8</h1>
+    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v9</h1>
   </div>
-  <p class="sub">Fixes fast-pan crash with annotations. Use your <strong style="color:#f0ede8">original</strong> canvas.html only — never a previously patched file.</p>
+  <p class="sub">Fixes: fast-pan, page refresh, and second-document crashes. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
 
   <div class="pick-wrap">
     <div class="pick-face">
-      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 13v4h14v-4M10 3v10M6 7l4-4 4 4"/></svg>
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M3 13v4h14v-4M10 3v10M6 7l4-4 4 4"/>
+      </svg>
       Choose canvas.html
     </div>
     <input type="file" id="file-input" accept=".html,text/html">
@@ -72,7 +74,9 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   <div class="log" id="log"></div>
 
   <button id="dl-btn">
-    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 13v4h14v-4M10 3v10M6 7l4-4 4 4"/></svg>
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M3 13v4h14v-4M10 3v10M6 7l4-4 4 4"/>
+    </svg>
     Save canvas_ios.html
   </button>
 
@@ -117,10 +121,7 @@ inp.addEventListener('change', function () {
     var src = reader.result;
     log(Math.round(src.length / 1024) + ' KB loaded.', 'info');
 
-    // Guard against re-patching
-    if (src.indexOf('isIOS ? 1.0 : 2.0') !== -1 ||
-        src.indexOf('isIOS?1.0:2.0') !== -1 ||
-        src.indexOf('_iosRDTimer') !== -1) {
+    if (src.indexOf('isIOS ? 1.0 : 2.0') !== -1 || src.indexOf('_iosRDTimer') !== -1) {
       log('⚠  Already patched — use the ORIGINAL canvas.html', 'warn');
     }
     if (src.indexOf('const renderScale=2.0;') === -1) {
@@ -133,7 +134,6 @@ inp.addEventListener('change', function () {
       ? '✓ All ' + result.ok + ' patches applied!'
       : result.ok + ' applied, ' + result.fail + ' failed',
       result.fail === 0 ? 'ok' : 'err');
-
     output = result.src;
     dlBtn.classList.add('show');
     steps.classList.add('show');
@@ -150,16 +150,17 @@ dlBtn.addEventListener('click', function () {
     navigator.share({ files: [file], title: 'canvas_ios.html' }).catch(function () {});
   } else {
     var url = URL.createObjectURL(blob);
-    var a   = document.createElement('a');
-    a.href = url; a.download = 'canvas_ios.html';
+    var a = document.createElement('a'); a.href = url; a.download = 'canvas_ios.html';
     document.body.appendChild(a); a.click();
     setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
   }
 });
 
-// ──────────────────────────────────────────────────────────
-// PATCHES — applied in order, each is a self-contained swap
-// ──────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// PATCHES
+// Each is an isolated string swap. A missed anchor skips that
+// patch only — it cannot corrupt the file.
+// ════════════════════════════════════════════════════════════════
 function applyAll(src) {
   var ok = 0, fail = 0;
 
@@ -170,8 +171,8 @@ function applyAll(src) {
     log('✓  ' + label, 'ok'); ok++; return true;
   }
 
-  // ── P1: isIOS flag + renderScale 1.0 ───────────────────────────
-  // 4× less canvas RAM. isIOS is used by all other patches.
+  // ── P1: isIOS flag + renderScale 1.0 ─────────────────────────
+  // Cuts canvas RAM by 4×. isIOS is used by every subsequent patch.
   swap(
     'const renderScale=2.0;',
     'const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||\n' +
@@ -180,28 +181,17 @@ function applyAll(src) {
     'P1 — isIOS flag + renderScale 1.0 (4× less canvas RAM)'
   );
 
-  // ── P2: Skip SVG redraws during pan on iOS ─────────────────────
-  //
-  // THE CRASH PATH:
-  //   pointermove → applyTransform() → redrawOverlay()
-  //   redrawOverlay() clears svgOverlay.innerHTML and rebuilds every
-  //   annotation/measurement element from scratch. During fast pan
-  //   this runs 60 times/sec. On iOS WKWebView each innerHTML clear +
-  //   rebuild causes GC pressure; with enough annotations it OOMs.
-  //
-  // THE FIX:
-  //   On iOS, replace the rAF call inside applyTransform with a
-  //   150 ms debounce. During a pan gesture the timer is constantly
-  //   reset, so the SVG is NEVER rebuilt mid-pan — only once, 150 ms
-  //   after the finger lifts. Desktop path is completely unchanged.
-  //
-  // Anchor is the exact comment + two lines at the end of applyTransform.
+  // ── P2: Debounce SVG rebuild during pan on iOS ────────────────
+  // applyTransform() calls redrawOverlay() on EVERY pointermove.
+  // redrawOverlay() clears and rebuilds the entire SVG DOM from scratch.
+  // At 60 Hz with many annotations this is the fast-pan crash path.
+  // Fix: on iOS replace the rAF with a 150 ms debounce so the SVG
+  // is never rebuilt while the finger is moving — only once after lift.
   swap(
     '  // Redraw labels in real-time during pinch \u2014 rAF-throttled so we never queue more than one\n' +
     '  cancelAnimationFrame(_rafRedraw);\n' +
     '  _rafRedraw = requestAnimationFrame(()=>{ redrawOverlay(); });',
-
-    '  // iOS: skip SVG rebuild during pan — fire once 150ms after finger lifts\n' +
+    '  // iOS: skip SVG rebuild during pan — one redraw 150 ms after finger lifts\n' +
     '  if (isIOS) {\n' +
     '    clearTimeout(_iosRDTimer);\n' +
     '    _iosRDTimer = setTimeout(function () { redrawOverlay(); }, 150);\n' +
@@ -209,28 +199,24 @@ function applyAll(src) {
     '    cancelAnimationFrame(_rafRedraw);\n' +
     '    _rafRedraw = requestAnimationFrame(function () { redrawOverlay(); });\n' +
     '  }',
-
-    'P2 — skip SVG redraw during pan, fire once on lift (fixes fast-pan crash)'
+    'P2 — debounce SVG redraw during pan (fixes fast-pan crash)'
   );
 
-  // ── P3: Declare _iosRDTimer alongside _rafRedraw ───────────────
-  // _rafRedraw is declared as `let _rafRedraw = null` near the top of
-  // the script. We need _iosRDTimer next to it so it's in scope.
+  // ── P3: Declare _iosRDTimer alongside _rafRedraw ──────────────
   swap(
     'let _rafRedraw = null',
     'let _rafRedraw = null, _iosRDTimer = null',
     'P3 — declare _iosRDTimer variable'
   );
 
-  // ── P4: Cache getBoundingClientRect on iOS ─────────────────────
-  // screenToCanvas() is called on every pointermove. getBoundingClientRect
-  // forces a layout reflow each time — expensive on iOS.
+  // ── P4: Cache getBoundingClientRect on iOS ────────────────────
+  // screenToCanvas() is called on every pointermove. Each call to
+  // getBoundingClientRect forces a layout reflow — expensive on iOS.
   swap(
     'function screenToCanvas(sx,sy) {\n' +
     '  const r=canvasViewport.getBoundingClientRect();\n' +
     '  return { x:(sx-r.left-panX)/zoom, y:(sy-r.top-panY)/zoom };\n' +
     '}',
-
     'var _vpRectCache = null;\n' +
     'if (isIOS) {\n' +
     '  window.addEventListener(\'resize\', function () { _vpRectCache = null; }, { passive: true });\n' +
@@ -242,23 +228,81 @@ function applyAll(src) {
     '    : canvasViewport.getBoundingClientRect();\n' +
     '  return { x: (sx - r.left - panX) / zoom, y: (sy - r.top - panY) / zoom };\n' +
     '}',
-
-    'P4 — cache getBoundingClientRect (no layout reflow per touch event)'
+    'P4 — cache getBoundingClientRect (no reflow per touch event)'
   );
 
-  // ── P5: Defer auto-restore on iOS ─────────────────────────────
-  // Prevents cold-start OOM by waiting for first tap before restoring.
-  // Tries multiple whitespace formats.
-  var p5anchors = [
+  // ── P5: Free bytes + clear geometry when loading a new PDF ────
+  //
+  // SECOND-DOCUMENT CRASH:
+  // When a second PDF is selected, the first PDF's pageSegments[] array
+  // (thousands of snap geometry segments) is still alive in RAM while
+  // the new file is being read, parsed by pdf.js, and rendered.
+  // Two PDFs worth of data simultaneously = OOM.
+  //
+  // Fix: at the very top of loadPDF(), before anything else happens,
+  // clear pageSegments and snapGrid so the first PDF's geometry is freed.
+  // Also: once pdf.js has resolved its promise it has copied the ArrayBuffer
+  // to its worker — null currentPdfBytes immediately so iOS can reclaim it
+  // before render starts.
+  swap(
+    'function loadPDF(file) {\n' +
+    '  currentFilename=file.name;',
+    'function loadPDF(file) {\n' +
+    '  if (isIOS) { pageSegments = []; snapGrid = null; } // free prev PDF geometry\n' +
+    '  currentFilename=file.name;',
+    'P5a — clear old geometry before loading new PDF (second-doc crash)'
+  );
+
+  // After pdf.js resolves in loadPDF, null our copy of the bytes.
+  // pdf.js has already transferred the data to its worker — our ArrayBuffer
+  // is just dead weight holding up render memory on iOS.
+  // Anchor: unique 6-space indent inside loadPDF's reader.onload .then()
+  swap(
+    '      pdfDoc=doc; totalPages=doc.numPages; currentPage=1;\n' +
+    '      measurements=[]; annotations=[]; calibration=null; calLine=null; selectedItem=null;\n' +
+    '      scaleBadge.classList.remove(\'visible\');',
+    '      if (isIOS) { currentPdfBytes = null; } // pdf.js worker has it, free main-thread copy\n' +
+    '      pdfDoc=doc; totalPages=doc.numPages; currentPage=1;\n' +
+    '      measurements=[]; annotations=[]; calibration=null; calLine=null; selectedItem=null;\n' +
+    '      scaleBadge.classList.remove(\'visible\');',
+    'P5b — free bytes after pdf.js resolves in loadPDF'
+  );
+
+  // ── P6: Free bytes after pdf.js resolves in loadSessionFromStore
+  //
+  // REFRESH/RESTORE CRASH:
+  // loadSessionFromStore() loads the PDF bytes from IndexedDB into
+  // currentPdfBytes, hands them to pdf.js, then never frees them.
+  // The IDB-save P8 patch only frees bytes on WRITE, not on READ.
+  // So after a refresh, currentPdfBytes holds the full PDF in RAM
+  // throughout the entire render + session restore sequence.
+  //
+  // Fix: same pattern as P5b but in loadSessionFromStore.
+  // Anchor: unique 4-space indent (vs 6-space in loadPDF above).
+  swap(
+    '    pdfDoc=doc; totalPages=doc.numPages; currentPage=1;\n' +
+    '    measurements=[]; annotations=[]; calibration=null; calLine=null; selectedItem=null;\n' +
+    '    scaleBadge.classList.remove(\'visible\');',
+    '    if (isIOS) { currentPdfBytes = null; } // pdf.js worker has it, free main-thread copy\n' +
+    '    pdfDoc=doc; totalPages=doc.numPages; currentPage=1;\n' +
+    '    measurements=[]; annotations=[]; calibration=null; calLine=null; selectedItem=null;\n' +
+    '    scaleBadge.classList.remove(\'visible\');',
+    'P6 — free bytes after pdf.js resolves in loadSessionFromStore (refresh crash)'
+  );
+
+  // ── P7: Defer auto-restore on iOS ────────────────────────────
+  // Cold start: PDF parse + render + IDB restore all at once = OOM.
+  // Delay restore until first tap.
+  var p7anchors = [
     '      if(bytes){\n        loadSessionFromStore(latest.filename);\n      }',
     '      if(bytes){ loadSessionFromStore(latest.filename); }',
     'if(bytes){ loadSessionFromStore(latest.filename); }',
   ];
-  var p5done = false;
-  for (var i = 0; i < p5anchors.length; i++) {
-    var idx = src.indexOf(p5anchors[i]);
+  var p7done = false;
+  for (var i = 0; i < p7anchors.length; i++) {
+    var idx = src.indexOf(p7anchors[i]);
     if (idx !== -1) {
-      var repl =
+      src = src.slice(0, idx) +
         '      if (bytes) {\n' +
         '        if (isIOS) {\n' +
         '          document.addEventListener(\'pointerdown\', function _dr() {\n' +
@@ -268,20 +312,23 @@ function applyAll(src) {
         '        } else {\n' +
         '          loadSessionFromStore(latest.filename);\n' +
         '        }\n' +
-        '      }';
-      src = src.slice(0, idx) + repl + src.slice(idx + p5anchors[i].length);
-      log('✓  P5 — defer auto-restore until first tap (cold-start OOM)', 'ok'); ok++;
-      p5done = true; break;
+        '      }' +
+        src.slice(idx + p7anchors[i].length);
+      log('✓  P7 — defer auto-restore until first tap (cold-start crash)', 'ok'); ok++;
+      p7done = true; break;
     }
   }
-  if (!p5done) { log('✗  P5 — defer auto-restore — anchor not found', 'err'); fail++; }
+  if (!p7done) { log('✗  P7 — defer auto-restore — anchor not found', 'err'); fail++; }
 
-  // ── P6: Free PDF bytes after IDB save ─────────────────────────
+  // ── P8: Free bytes after IDB save ────────────────────────────
+  // When a NEW PDF is uploaded, savePdfBytes() is called first.
+  // After the IDB transaction completes, null our copy — pdf.js
+  // already has the data and we no longer need it on the main thread.
   swap(
     'tx.oncomplete=()=>res(true);\n      tx.onerror=e=>rej(e.target.error);',
     'tx.oncomplete = () => { if (isIOS) { currentPdfBytes = null; } res(true); };\n' +
     '      tx.onerror = e => rej(e.target.error);',
-    'P6 — free PDF bytes after IDB save (reclaim 5–30 MB on iOS)'
+    'P8 — free bytes after IDB save (reclaim 5–30 MB on upload)'
   );
 
   return { src: src, ok: ok, fail: fail };
