@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MeasurePDF iOS Patcher v6</title>
+<title>MeasurePDF iOS Patcher v7</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -57,9 +57,9 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   </div>
   <div>
     <h1>Modern <span>Measure</span></h1>
-    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v6 — minimal safe</h1>
+    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v7</h1>
   </div>
-  <p class="sub">3 targeted patches that cannot break PDF loading. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
+  <p class="sub">5 patches. Fixes cold-start crash <em>and</em> crash-on-fast-pan with annotations. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
 
   <div class="pick-wrap">
     <div class="pick-face">
@@ -111,25 +111,24 @@ inp.addEventListener('change', function () {
   if (!file) return;
 
   log('Reading ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)…', 'info');
-
   var reader = new FileReader();
   reader.onerror = function () { log('Read error', 'err'); };
-  reader.onload  = function () {
+  reader.onload = function () {
     var src = reader.result;
     log(Math.round(src.length / 1024) + ' KB loaded.', 'info');
 
-    if (src.indexOf('const isIOS=') !== -1 || src.indexOf('isIOS?1.0:2.0') !== -1) {
-      log('⚠  Already patched — please use the original canvas.html', 'warn');
+    if (src.indexOf('const isIOS=') !== -1 || src.indexOf('isIOS ? 1.0') !== -1 || src.indexOf('isIOS?1.0') !== -1) {
+      log('⚠  Looks already patched — please use the ORIGINAL canvas.html', 'warn');
     }
     if (src.indexOf('const renderScale=2.0;') === -1) {
       log('⚠  renderScale=2.0 not found — may be wrong file', 'warn');
     }
 
-    var result = patch(src);
+    var result = applyAll(src);
     log('');
     log(result.fail === 0
       ? '✓ All ' + result.ok + ' patches applied!'
-      : result.ok + ' applied, ' + result.fail + ' failed — check warnings above',
+      : result.ok + ' applied, ' + result.fail + ' failed',
       result.fail === 0 ? 'ok' : 'err');
 
     output = result.src;
@@ -156,105 +155,115 @@ dlBtn.addEventListener('click', function () {
 });
 
 // ──────────────────────────────────────────────────────────
-//  PATCH FUNCTION
-//  Only 3 patches — each is a simple string replacement.
-//  None of them inject new function definitions or restructure
-//  control flow, so a missed anchor just skips that patch
-//  without breaking anything else.
+// PATCHES
 // ──────────────────────────────────────────────────────────
 
-function patch(src) {
+function applyAll(src) {
   var ok = 0, fail = 0;
 
-  function apply(anchor, replacement, label) {
+  // Replace anchor with replacement. Logs result.
+  function swap(anchor, replacement, label) {
     var i = src.indexOf(anchor);
-    if (i === -1) {
-      log('✗  ' + label + ' — not found', 'err');
-      fail++;
-      return;
-    }
+    if (i === -1) { log('✗  ' + label + ' — anchor not found', 'err'); fail++; return false; }
     src = src.slice(0, i) + replacement + src.slice(i + anchor.length);
-    log('✓  ' + label, 'ok');
-    ok++;
+    log('✓  ' + label, 'ok'); ok++; return true;
   }
 
-  // ── PATCH 1 ────────────────────────────────────────────────────
-  // Halve render resolution on iOS: 2.0 → 1.0
-  // Effect: canvas memory drops from ~4× to ~1×. Single-line swap.
-  // ──────────────────────────────────────────────────────────────
-  apply(
+  // ── P1: isIOS detection + renderScale 1.0 ──────────────────────
+  // Halves linear dimension → 4× less canvas memory on iOS.
+  // isIOS is declared here so all later patches can use it.
+  swap(
     'const renderScale=2.0;',
-
     'const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||\n' +
     '  (navigator.platform === \'MacIntel\' && navigator.maxTouchPoints > 1);\n' +
     'const renderScale = isIOS ? 1.0 : 2.0;',
-
-    'P1 — renderScale 1.0 on iOS (was 2.0, saves 75% canvas RAM)'
+    'P1 — renderScale 1.0 on iOS (4× less canvas RAM)'
   );
 
-  // ── PATCH 2 ────────────────────────────────────────────────────
-  // Defer auto-restore until first user tap on iOS.
-  // Cold-start: PDF decode + render + IDB restore at once = OOM.
-  // Waiting for first tap spreads the work out.
-  // Tries two possible anchor formats (different patcher versions
-  // may have produced slightly different whitespace).
-  // ──────────────────────────────────────────────────────────────
-  var p2anchors = [
-    // format A — as written in original source
+  // ── P2: rAF-throttle redrawOverlay on iOS ─────────────────────
+  // ROOT CAUSE OF FAST-PAN CRASH:
+  // applyTransform() → redrawOverlay() on every pointermove (60 Hz).
+  // Each call clears and rebuilds the entire SVG DOM from scratch.
+  // With many annotations this is expensive; on iOS it triggers OOM.
+  //
+  // Fix: wrap redrawOverlay so on iOS it only fires once per animation
+  // frame, coalescing multiple calls into one. On desktop unchanged.
+  //
+  // Injected right before applyTransform so isIOS is already defined.
+  swap(
+    'function applyTransform() {',
+    '// iOS: throttle redrawOverlay to one call per animation frame\n' +
+    'if (isIOS) {\n' +
+    '  var _raf_ro = null;\n' +
+    '  var _origRedrawOverlay = redrawOverlay;\n' +
+    '  redrawOverlay = function () {\n' +
+    '    if (_raf_ro) cancelAnimationFrame(_raf_ro);\n' +
+    '    _raf_ro = requestAnimationFrame(function () { _raf_ro = null; _origRedrawOverlay(); });\n' +
+    '  };\n' +
+    '}\n\n' +
+    'function applyTransform() {',
+    'P2 — rAF-throttle redrawOverlay during pan (fixes fast-pan crash)'
+  );
+
+  // ── P3: Cache getBoundingClientRect on iOS ─────────────────────
+  // getBoundingClientRect forces a layout reflow — called on every
+  // pointermove inside screenToCanvas. On iOS this is slow.
+  // Cache the result and only invalidate on resize/orientation change.
+  swap(
+    'function screenToCanvas(sx,sy) {\n  const r=canvasViewport.getBoundingClientRect();\n  return { x:(sx-r.left-panX)/zoom, y:(sy-r.top-panY)/zoom };\n}',
+    'var _vpRectCache = null;\n' +
+    'if (isIOS) {\n' +
+    '  window.addEventListener(\'resize\', function () { _vpRectCache = null; }, { passive: true });\n' +
+    '  window.addEventListener(\'orientationchange\', function () { _vpRectCache = null; }, { passive: true });\n' +
+    '}\n' +
+    'function screenToCanvas(sx, sy) {\n' +
+    '  var r = isIOS\n' +
+    '    ? (_vpRectCache || (_vpRectCache = canvasViewport.getBoundingClientRect()))\n' +
+    '    : canvasViewport.getBoundingClientRect();\n' +
+    '  return { x: (sx - r.left - panX) / zoom, y: (sy - r.top - panY) / zoom };\n' +
+    '}',
+    'P3 — cache getBoundingClientRect (avoids layout reflow per touch)'
+  );
+
+  // ── P4: Defer auto-restore on iOS ─────────────────────────────
+  // Cold-start: PDF decode + render + IDB restore simultaneously = OOM.
+  // On iOS, delay the IDB restore until the first user tap.
+  // Try all known whitespace formats — patcher history has produced several.
+  var p4done = false;
+  var p4variants = [
     '      if(bytes){\n        loadSessionFromStore(latest.filename);\n      }',
-    // format B — compact single line
+    '      if(bytes){ loadSessionFromStore(latest.filename); }',
     'if(bytes){ loadSessionFromStore(latest.filename); }',
-    // format C — with const
-    'if(bytes){\n      loadSessionFromStore(latest.filename);\n    }'
   ];
-  var p2replacement_a =
+  var p4repl =
     '      if (bytes) {\n' +
     '        if (isIOS) {\n' +
-    '          // defer restore until first tap to avoid cold-start OOM\n' +
-    '          document.addEventListener(\'pointerdown\', function _deferRestore() {\n' +
-    '            document.removeEventListener(\'pointerdown\', _deferRestore);\n' +
+    '          // defer until first tap to avoid cold-start OOM\n' +
+    '          document.addEventListener(\'pointerdown\', function _dr() {\n' +
+    '            document.removeEventListener(\'pointerdown\', _dr);\n' +
     '            loadSessionFromStore(latest.filename);\n' +
     '          }, { once: true, passive: true });\n' +
     '        } else {\n' +
     '          loadSessionFromStore(latest.filename);\n' +
     '        }\n' +
     '      }';
-  var p2replacement_b =
-    'if (bytes) {\n' +
-    '  if (isIOS) {\n' +
-    '    document.addEventListener(\'pointerdown\', function _deferRestore() {\n' +
-    '      document.removeEventListener(\'pointerdown\', _deferRestore);\n' +
-    '      loadSessionFromStore(latest.filename);\n' +
-    '    }, { once: true, passive: true });\n' +
-    '  } else {\n' +
-    '    loadSessionFromStore(latest.filename);\n' +
-    '  }\n' +
-    '}';
-
-  var p2done = false;
-  if (src.indexOf(p2anchors[0]) !== -1) {
-    src = src.replace(p2anchors[0], p2replacement_a);
-    log('✓  P2 — defer auto-restore until first tap (iOS)', 'ok'); ok++; p2done = true;
-  } else if (src.indexOf(p2anchors[1]) !== -1) {
-    src = src.replace(p2anchors[1], p2replacement_b);
-    log('✓  P2 — defer auto-restore until first tap (iOS)', 'ok'); ok++; p2done = true;
-  } else if (src.indexOf(p2anchors[2]) !== -1) {
-    src = src.replace(p2anchors[2], p2replacement_a.replace(/^      /mg, '    '));
-    log('✓  P2 — defer auto-restore until first tap (iOS)', 'ok'); ok++; p2done = true;
+  for (var pi = 0; pi < p4variants.length; pi++) {
+    if (src.indexOf(p4variants[pi]) !== -1) {
+      src = src.slice(0, src.indexOf(p4variants[pi])) + p4repl +
+            src.slice(src.indexOf(p4variants[pi]) + p4variants[pi].length);
+      log('✓  P4 — defer auto-restore until first tap (iOS)', 'ok'); ok++; p4done = true; break;
+    }
   }
-  if (!p2done) { log('✗  P2 — defer auto-restore — anchor not found', 'err'); fail++; }
+  if (!p4done) { log('✗  P4 — defer auto-restore — anchor not found', 'err'); fail++; }
 
-  // ── PATCH 3 ────────────────────────────────────────────────────
-  // After the PDF bytes are saved to IndexedDB, null the main-thread
-  // copy so iOS can reclaim that memory before rendering starts.
-  // ──────────────────────────────────────────────────────────────
-  apply(
+  // ── P5: Free PDF bytes after IDB save ────────────────────────
+  // After bytes are stored in IndexedDB, the main-thread ArrayBuffer
+  // is no longer needed. On iOS, freeing it gives back 5–30 MB.
+  swap(
     'tx.oncomplete=()=>res(true);\n      tx.onerror=e=>rej(e.target.error);',
-
     'tx.oncomplete = () => { if (isIOS) { currentPdfBytes = null; } res(true); };\n' +
     '      tx.onerror = e => rej(e.target.error);',
-
-    'P3 — free PDF bytes from main thread after IDB save (iOS)'
+    'P5 — free PDF bytes from RAM after IDB save (iOS)'
   );
 
   return { src: src, ok: ok, fail: fail };
