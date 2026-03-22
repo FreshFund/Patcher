@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MeasurePDF iOS Patcher v5</title>
+<title>MeasurePDF iOS Patcher v6</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -22,21 +22,20 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
 .pick-wrap { position:relative; width:100%; height:52px; }
 .pick-face {
   position:absolute;inset:0;background:#ff0000;color:#fff;border:none;border-radius:14px;
-  font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;
-  pointer-events:none;
+  font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px;pointer-events:none;
 }
 .pick-wrap:active .pick-face { background:#cc0000; }
 #file-input { position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:16px; }
 .log {
   background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:14px;
   font-family:'SF Mono',Menlo,monospace;font-size:12px;line-height:1.8;color:#888;
-  display:none;max-height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;
+  display:none;max-height:300px;overflow-y:auto;
 }
 .log.show { display:block; }
-.ok  { color:#27ae60; }
-.err { color:#e74c3c; }
-.warn{ color:#f39c12; }
-.info{ color:#3498db; }
+.ok   { color:#27ae60; }
+.err  { color:#e74c3c; }
+.warn { color:#f39c12; }
+.info { color:#3498db; }
 #dl-btn {
   display:none;width:100%;height:52px;background:#27ae60;color:#fff;border:none;
   border-radius:14px;font-size:16px;font-weight:600;align-items:center;justify-content:center;
@@ -58,9 +57,9 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   </div>
   <div>
     <h1>Modern <span>Measure</span></h1>
-    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v5</h1>
+    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v6 — minimal safe</h1>
   </div>
-  <p class="sub">Use your <strong style="color:#f0ede8">original</strong> canvas.html — never a previously patched file.</p>
+  <p class="sub">3 targeted patches that cannot break PDF loading. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
 
   <div class="pick-wrap">
     <div class="pick-face">
@@ -71,25 +70,28 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   </div>
 
   <div class="log" id="log"></div>
+
   <button id="dl-btn">
     <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 13v4h14v-4M10 3v10M6 7l4-4 4 4"/></svg>
     Save canvas_ios.html
   </button>
+
   <div class="steps" id="steps">
     <div style="color:#f0ede8;font-weight:600;margin-bottom:4px;">To save on iPhone:</div>
     <div>1. Tap <b style="color:#f0ede8">Save canvas_ios.html</b> above</div>
     <div>2. Tap the <b style="color:#f0ede8">Share</b> icon (box ↑ arrow)</div>
     <div>3. Tap <b style="color:#f0ede8">Save to Files</b></div>
   </div>
+
   <p class="note">Runs entirely on-device. Your file never leaves your phone.</p>
 </div>
 
 <script>
-var inp = document.getElementById('file-input');
-var logEl = document.getElementById('log');
-var dlBtn = document.getElementById('dl-btn');
-var steps = document.getElementById('steps');
-var patchedSrc = null;
+var inp    = document.getElementById('file-input');
+var logEl  = document.getElementById('log');
+var dlBtn  = document.getElementById('dl-btn');
+var steps  = document.getElementById('steps');
+var output = null;
 
 function log(msg, cls) {
   logEl.classList.add('show');
@@ -100,34 +102,37 @@ function log(msg, cls) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-inp.addEventListener('change', function() {
+inp.addEventListener('change', function () {
   var file = this.files && this.files[0];
   logEl.innerHTML = '';
   dlBtn.classList.remove('show');
   steps.classList.remove('show');
-  patchedSrc = null;
+  output = null;
   if (!file) return;
-  log('Reading ' + file.name + ' (' + Math.round(file.size/1024) + ' KB)…', 'info');
-  var reader = new FileReader();
-  reader.onerror = function() { log('Read error', 'err'); };
-  reader.onload = function() {
-    var src = reader.result;
-    log(Math.round(src.length/1024) + ' KB loaded.', 'info');
 
-    // Guard: already patched?
-    if (src.indexOf('const isIOS=') !== -1) {
-      log('⚠ This file already has iOS patches — use the ORIGINAL canvas.html', 'warn');
+  log('Reading ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)…', 'info');
+
+  var reader = new FileReader();
+  reader.onerror = function () { log('Read error', 'err'); };
+  reader.onload  = function () {
+    var src = reader.result;
+    log(Math.round(src.length / 1024) + ' KB loaded.', 'info');
+
+    if (src.indexOf('const isIOS=') !== -1 || src.indexOf('isIOS?1.0:2.0') !== -1) {
+      log('⚠  Already patched — please use the original canvas.html', 'warn');
     }
     if (src.indexOf('const renderScale=2.0;') === -1) {
-      log('⚠ renderScale=2.0 not found — may be wrong file or already patched', 'warn');
+      log('⚠  renderScale=2.0 not found — may be wrong file', 'warn');
     }
 
-    var r = applyPatches(src);
+    var result = patch(src);
     log('');
-    log(r.fail === 0
-      ? '✓ All ' + r.ok + ' patches applied!'
-      : r.ok + ' applied, ' + r.fail + ' failed', r.fail === 0 ? 'ok' : 'err');
-    patchedSrc = r.src;
+    log(result.fail === 0
+      ? '✓ All ' + result.ok + ' patches applied!'
+      : result.ok + ' applied, ' + result.fail + ' failed — check warnings above',
+      result.fail === 0 ? 'ok' : 'err');
+
+    output = result.src;
     dlBtn.classList.add('show');
     steps.classList.add('show');
   };
@@ -135,215 +140,124 @@ inp.addEventListener('change', function() {
   this.value = '';
 });
 
-dlBtn.addEventListener('click', function() {
-  if (!patchedSrc) return;
-  var blob = new Blob([patchedSrc], {type:'text/html'});
-  var file = new File([blob], 'canvas_ios.html', {type:'text/html'});
-  if (navigator.canShare && navigator.canShare({files:[file]})) {
-    navigator.share({files:[file], title:'canvas_ios.html'}).catch(function(){});
+dlBtn.addEventListener('click', function () {
+  if (!output) return;
+  var blob = new Blob([output], { type: 'text/html' });
+  var file = new File([blob], 'canvas_ios.html', { type: 'text/html' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file], title: 'canvas_ios.html' }).catch(function () {});
   } else {
     var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
+    var a   = document.createElement('a');
     a.href = url; a.download = 'canvas_ios.html';
     document.body.appendChild(a); a.click();
-    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
   }
 });
 
-// ════════════════════════════════════════════════════
-// PATCHES
-// ════════════════════════════════════════════════════
+// ──────────────────────────────────────────────────────────
+//  PATCH FUNCTION
+//  Only 3 patches — each is a simple string replacement.
+//  None of them inject new function definitions or restructure
+//  control flow, so a missed anchor just skips that patch
+//  without breaking anything else.
+// ──────────────────────────────────────────────────────────
 
-function applyPatches(src) {
+function patch(src) {
   var ok = 0, fail = 0;
 
-  // safe replace — only replaces if anchor found exactly once
-  function patch(anchor, replacement, tag) {
-    var idx = src.indexOf(anchor);
-    if (idx === -1) { log('✗  ' + tag + ' — anchor not found', 'err'); fail++; return; }
-    src = src.slice(0, idx) + replacement + src.slice(idx + anchor.length);
-    log('✓  ' + tag, 'ok'); ok++;
-  }
-  function patchBefore(anchor, inject, tag) {
-    patch(anchor, inject + anchor, tag);
-  }
-  function patchAfter(anchor, inject, tag) {
-    patch(anchor, anchor + inject, tag);
+  function apply(anchor, replacement, label) {
+    var i = src.indexOf(anchor);
+    if (i === -1) {
+      log('✗  ' + label + ' — not found', 'err');
+      fail++;
+      return;
+    }
+    src = src.slice(0, i) + replacement + src.slice(i + anchor.length);
+    log('✓  ' + label, 'ok');
+    ok++;
   }
 
-  // ── P1: isIOS detection + renderScale 1.0 ──────────────────────
-  patch(
+  // ── PATCH 1 ────────────────────────────────────────────────────
+  // Halve render resolution on iOS: 2.0 → 1.0
+  // Effect: canvas memory drops from ~4× to ~1×. Single-line swap.
+  // ──────────────────────────────────────────────────────────────
+  apply(
     'const renderScale=2.0;',
-    'const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform===\'MacIntel\'&&navigator.maxTouchPoints>1);\nconst renderScale=isIOS?1.0:2.0;',
-    'isIOS + renderScale 1.0 (was 2.0)'
+
+    'const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||\n' +
+    '  (navigator.platform === \'MacIntel\' && navigator.maxTouchPoints > 1);\n' +
+    'const renderScale = isIOS ? 1.0 : 2.0;',
+
+    'P1 — renderScale 1.0 on iOS (was 2.0, saves 75% canvas RAM)'
   );
 
-  // ── P2: Throbber CSS ────────────────────────────────────────────
-  var lastStyle = src.lastIndexOf('</style>');
-  if (lastStyle !== -1) {
-    var css = [
-      '  /* iOS throbber */',
-      '  #ios-throbber{position:fixed;inset:0;z-index:600;background:rgba(10,10,10,0.88);',
-      '    display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;',
-      '    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}',
-      '  #ios-throbber.show{display:flex;}',
-      '  #ios-throbber-spinner{width:44px;height:44px;border:3px solid rgba(255,255,255,0.12);',
-      '    border-top-color:#ff0000;border-radius:50%;animation:ios-spin 0.8s linear infinite;}',
-      '  @keyframes ios-spin{to{transform:rotate(360deg);}}',
-      '  #ios-throbber-msg{font-family:\'DM Mono\',monospace;font-size:11px;color:#666;',
-      '    letter-spacing:0.08em;text-transform:uppercase;}',
-      ''
-    ].join('\n');
-    src = src.slice(0, lastStyle) + css + src.slice(lastStyle);
-    log('✓  Throbber CSS', 'ok'); ok++;
-  } else { log('✗  Throbber CSS — no </style>', 'err'); fail++; }
-
-  // ── P3: Throbber HTML ───────────────────────────────────────────
-  patchBefore(
-    '<!-- SPLASH / ACCESS GATE -->',
-    '<!-- iOS throbber -->\n<div id="ios-throbber"><div id="ios-throbber-spinner"></div><div id="ios-throbber-msg">Loading…</div></div>\n\n',
-    'Throbber HTML'
-  );
-
-  // ── P4: iOS helper functions (after workerSrc) ──────────────────
-  // These are injected as a self-contained block — safe even if isIOS is false
-  var workerLine = "pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';";
-  patchAfter(workerLine,
-    '\n\n// ── iOS helpers ──\nvar _iosThrobber=null,_iosThrobberMsg=null;\n' +
-    'function _initThrobber(){if(_iosThrobber)return;_iosThrobber=document.getElementById(\'ios-throbber\');_iosThrobberMsg=document.getElementById(\'ios-throbber-msg\');}\n' +
-    'function showThrobber(msg){if(!isIOS)return;_initThrobber();if(_iosThrobber)_iosThrobber.classList.add(\'show\');if(_iosThrobberMsg&&msg)_iosThrobberMsg.textContent=msg;}\n' +
-    'function hideThrobber(){_initThrobber();if(_iosThrobber)_iosThrobber.classList.remove(\'show\');}\n' +
-    'if(isIOS){\n' +
-    '  document.addEventListener(\'visibilitychange\',function(){\n' +
-    '    if(document.visibilityState===\'visible\'&&pdfDoc)renderPage(currentPage);\n' +
-    '  });\n' +
-    '  window.addEventListener(\'pageshow\',function(e){\n' +
-    '    if(e.persisted&&pdfDoc)renderPage(currentPage);\n' +
-    '  });\n' +
-    '}\n',
-    'iOS helpers + visibility recovery'
-  );
-
-  // ── P5: Batched geometry extractor for iOS ──────────────────────
-  // Injected after the existing extractPageGeometry function
-  var afterExtractor = '  } catch(e) {\n  }\n\n}\n';
-  patchAfter(afterExtractor,
-    '\n// ── iOS batched geometry extractor ──\n' +
-    'async function extractPageGeometryIOS(page,viewport){\n' +
-    '  pageSegments=[];snapGrid=null;\n' +
-    '  var vt=viewport.transform;\n' +
-    '  function cc(c,m){return[c[0]*m[0]+c[2]*m[1],c[1]*m[0]+c[3]*m[1],c[0]*m[2]+c[2]*m[3],c[1]*m[2]+c[3]*m[3],c[0]*m[4]+c[2]*m[5]+c[4],c[1]*m[4]+c[3]*m[5]+c[5]];}\n' +
-    '  function mh(ctm){\n' +
-    '    function pc(px,py){var x=ctm[0]*px+ctm[2]*py+ctm[4],y=ctm[1]*px+ctm[3]*py+ctm[5];return{x:vt[0]*x+vt[2]*y+vt[4],y:vt[1]*x+vt[3]*y+vt[5]};}\n' +
-    '    function ps(ax,ay,bx,by){var p1=pc(ax,ay),p2=pc(bx,by);if(Math.hypot(p2.x-p1.x,p2.y-p1.y)>=2)pageSegments.push({x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,isCurve:false});}\n' +
-    '    return{pdfToCanvas:pc,pushSeg:ps};\n' +
+  // ── PATCH 2 ────────────────────────────────────────────────────
+  // Defer auto-restore until first user tap on iOS.
+  // Cold-start: PDF decode + render + IDB restore at once = OOM.
+  // Waiting for first tap spreads the work out.
+  // Tries two possible anchor formats (different patcher versions
+  // may have produced slightly different whitespace).
+  // ──────────────────────────────────────────────────────────────
+  var p2anchors = [
+    // format A — as written in original source
+    '      if(bytes){\n        loadSessionFromStore(latest.filename);\n      }',
+    // format B — compact single line
+    'if(bytes){ loadSessionFromStore(latest.filename); }',
+    // format C — with const
+    'if(bytes){\n      loadSessionFromStore(latest.filename);\n    }'
+  ];
+  var p2replacement_a =
+    '      if (bytes) {\n' +
+    '        if (isIOS) {\n' +
+    '          // defer restore until first tap to avoid cold-start OOM\n' +
+    '          document.addEventListener(\'pointerdown\', function _deferRestore() {\n' +
+    '            document.removeEventListener(\'pointerdown\', _deferRestore);\n' +
+    '            loadSessionFromStore(latest.filename);\n' +
+    '          }, { once: true, passive: true });\n' +
+    '        } else {\n' +
+    '          loadSessionFromStore(latest.filename);\n' +
+    '        }\n' +
+    '      }';
+  var p2replacement_b =
+    'if (bytes) {\n' +
+    '  if (isIOS) {\n' +
+    '    document.addEventListener(\'pointerdown\', function _deferRestore() {\n' +
+    '      document.removeEventListener(\'pointerdown\', _deferRestore);\n' +
+    '      loadSessionFromStore(latest.filename);\n' +
+    '    }, { once: true, passive: true });\n' +
+    '  } else {\n' +
+    '    loadSessionFromStore(latest.filename);\n' +
     '  }\n' +
-    '  function yn(){return new Promise(function(r){setTimeout(r,0);});}\n' +
-    '  try{\n' +
-    '    var ops=await page.getOperatorList(),fn=ops.fnArray,ar=ops.argsArray;\n' +
-    '    var ctm=[1,0,0,1,0,0],st=[ctm.slice()];\n' +
-    '    for(var i=0;i<fn.length;i++){\n' +
-    '      if(i%40===0)await yn();\n' +
-    '      var f=fn[i],a=ar[i];\n' +
-    '      if(f===_OPC.save)st.push(ctm.slice());\n' +
-    '      else if(f===_OPC.restore){if(st.length>1)ctm=st.pop();}\n' +
-    '      else if(f===_OPC.transform)ctm=cc(ctm,a);\n' +
-    '      else if(f===_OPC.paintFormXObjectBegin){st.push(ctm.slice());if(a&&Array.isArray(a[1])&&a[1].length===6)ctm=cc(ctm,a[1]);}\n' +
-    '      else if(f===_OPC.paintFormXObjectEnd){if(st.length>1)ctm=st.pop();}\n' +
-    '      else if(f===_OPC.constructPath){\n' +
-    '        var h=mh(ctm);decodeConstructPath(a[0],a[1],h.pdfToCanvas,h.pushSeg);\n' +
-    '        if(pageSegments.length%300===0)await yn();\n' +
-    '      }\n' +
-    '    }\n' +
-    '    await yn();\n' +
-    '    var seen=new Set(),dd=[];\n' +
-    '    for(var j=0;j<pageSegments.length;j++){\n' +
-    '      if(j%500===0)await yn();\n' +
-    '      var s=pageSegments[j];\n' +
-    '      var k=Math.round(s.x1)+\',\'+Math.round(s.y1)+\',\'+Math.round(s.x2)+\',\'+Math.round(s.y2);\n' +
-    '      var r=Math.round(s.x2)+\',\'+Math.round(s.y2)+\',\'+Math.round(s.x1)+\',\'+Math.round(s.y1);\n' +
-    '      if(!seen.has(k)&&!seen.has(r)){seen.add(k);dd.push(s);}\n' +
-    '    }\n' +
-    '    pageSegments=dd;await yn();\n' +
-    '    snapGrid=buildSnapGrid(pageSegments);\n' +
-    '  }catch(e){console.warn(\'[iOS snap]\',e);}\n' +
-    '}\n',
-    'iOS batched extractor'
-  );
+    '}';
 
-  // ── P6: Update renderPage to use iOS batched extractor ──────────
-  // Replaces only the extractPageGeometry call at the end of renderPage
-  var oldExtractCall = [
-    '      extractPageGeometry(page, vp).then(() => {',
-    '              if (pageSegments.length > 0) {',
-    '          if (snapEnabled) drawGeometryOverlay();',
-    '        }',
-    '      });'
-  ].join('\n');
-  var newExtractCall = [
-    '      if(isIOS){',
-    '        showThrobber(\'Indexing…\');',
-    '        extractPageGeometryIOS(page,vp).then(function(){',
-    '          hideThrobber();',
-    '          if(pageSegments.length>0&&snapEnabled)drawGeometryOverlay();',
-    '          try{page.cleanup();}catch(e){}',
-    '        }).catch(function(e){console.warn(e);hideThrobber();});',
-    '      } else {',
-    '        extractPageGeometry(page, vp).then(() => {',
-    '              if (pageSegments.length > 0) {',
-    '          if (snapEnabled) drawGeometryOverlay();',
-    '        }',
-    '        });',
-    '      }'
-  ].join('\n');
-  patch(oldExtractCall, newExtractCall, 'renderPage → iOS batched extractor');
-
-  // ── P7: rAF-debounce redrawOverlay on iOS ───────────────────────
-  var screenToCanvasFn = 'function screenToCanvas(sx,sy) {\n  const r=canvasViewport.getBoundingClientRect();\n  return { x:(sx-r.left-panX)/zoom, y:(sy-r.top-panY)/zoom };\n}';
-  patchBefore(screenToCanvasFn,
-    '// iOS: throttle redrawOverlay with rAF\n' +
-    'if(isIOS){\n' +
-    '  var _origRedraw=redrawOverlay,_raf=null;\n' +
-    '  redrawOverlay=function(){if(_raf)cancelAnimationFrame(_raf);_raf=requestAnimationFrame(function(){_raf=null;_origRedraw();});};\n' +
-    '}\n\n',
-    'rAF-debounce redrawOverlay (iOS)'
-  );
-
-  // ── P8: Cache getBoundingClientRect on iOS ──────────────────────
-  patch(
-    'function screenToCanvas(sx,sy) {\n  const r=canvasViewport.getBoundingClientRect();\n  return { x:(sx-r.left-panX)/zoom, y:(sy-r.top-panY)/zoom };\n}',
-    'var _vpRect=null;\n' +
-    'window.addEventListener(\'resize\',function(){_vpRect=null;},{passive:true});\n' +
-    'window.addEventListener(\'orientationchange\',function(){_vpRect=null;},{passive:true});\n' +
-    'function screenToCanvas(sx,sy){\n' +
-    '  var r=isIOS?(_vpRect||(_vpRect=canvasViewport.getBoundingClientRect())):canvasViewport.getBoundingClientRect();\n' +
-    '  return{x:(sx-r.left-panX)/zoom,y:(sy-r.top-panY)/zoom};\n' +
-    '}',
-    'Cache getBoundingClientRect (iOS)'
-  );
-
-  // ── P9: Defer auto-restore on iOS ───────────────────────────────
-  // Try two possible anchor formats (single-line and multi-line)
-  var p9a = 'if(bytes){ loadSessionFromStore(latest.filename); }';
-  var p9b = '      if(bytes){\n        loadSessionFromStore(latest.filename);\n      }';
-  var p9new_a = 'if(bytes){\n        if(isIOS){document.addEventListener(\'pointerdown\',function _r(){document.removeEventListener(\'pointerdown\',_r);loadSessionFromStore(latest.filename);},{once:true,passive:true});}else{loadSessionFromStore(latest.filename);}\n      }';
-  var p9new_b = '      if(bytes){\n        if(isIOS){document.addEventListener(\'pointerdown\',function _r(){document.removeEventListener(\'pointerdown\',_r);loadSessionFromStore(latest.filename);},{once:true,passive:true});}else{loadSessionFromStore(latest.filename);}\n      }';
-  if (src.indexOf(p9a) !== -1) {
-    patch(p9a, p9new_a, 'Defer auto-restore until first tap (iOS)');
-  } else if (src.indexOf(p9b) !== -1) {
-    patch(p9b, p9new_b, 'Defer auto-restore until first tap (iOS)');
-  } else {
-    log('✗  Defer auto-restore — anchor not found', 'err'); fail++;
+  var p2done = false;
+  if (src.indexOf(p2anchors[0]) !== -1) {
+    src = src.replace(p2anchors[0], p2replacement_a);
+    log('✓  P2 — defer auto-restore until first tap (iOS)', 'ok'); ok++; p2done = true;
+  } else if (src.indexOf(p2anchors[1]) !== -1) {
+    src = src.replace(p2anchors[1], p2replacement_b);
+    log('✓  P2 — defer auto-restore until first tap (iOS)', 'ok'); ok++; p2done = true;
+  } else if (src.indexOf(p2anchors[2]) !== -1) {
+    src = src.replace(p2anchors[2], p2replacement_a.replace(/^      /mg, '    '));
+    log('✓  P2 — defer auto-restore until first tap (iOS)', 'ok'); ok++; p2done = true;
   }
+  if (!p2done) { log('✗  P2 — defer auto-restore — anchor not found', 'err'); fail++; }
 
-  // ── P10: Free PDF bytes after save ──────────────────────────────
-  patch(
+  // ── PATCH 3 ────────────────────────────────────────────────────
+  // After the PDF bytes are saved to IndexedDB, null the main-thread
+  // copy so iOS can reclaim that memory before rendering starts.
+  // ──────────────────────────────────────────────────────────────
+  apply(
     'tx.oncomplete=()=>res(true);\n      tx.onerror=e=>rej(e.target.error);',
-    'tx.oncomplete=()=>{if(isIOS){currentPdfBytes=null;}res(true);};\n      tx.onerror=e=>rej(e.target.error);',
-    'Free PDF bytes after IDB save (iOS)'
+
+    'tx.oncomplete = () => { if (isIOS) { currentPdfBytes = null; } res(true); };\n' +
+    '      tx.onerror = e => rej(e.target.error);',
+
+    'P3 — free PDF bytes from main thread after IDB save (iOS)'
   );
 
-  return {src: src, ok: ok, fail: fail};
+  return { src: src, ok: ok, fail: fail };
 }
 </script>
 </body>
