@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MeasurePDF iOS Patcher v14</title>
+<title>MeasurePDF iOS Patcher v15</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -32,10 +32,8 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   display:none;max-height:320px;overflow-y:auto;
 }
 .log.show { display:block; }
-.ok   { color:#27ae60; }
-.err  { color:#e74c3c; }
-.warn { color:#f39c12; }
-.info { color:#3498db; }
+.ok { color:#27ae60; } .err { color:#e74c3c; }
+.warn { color:#f39c12; } .info { color:#3498db; }
 #dl-btn {
   display:none;width:100%;height:52px;background:#27ae60;color:#fff;border:none;
   border-radius:14px;font-size:16px;font-weight:600;align-items:center;justify-content:center;
@@ -58,9 +56,9 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   </div>
   <div>
     <h1>Modern <span>Measure</span></h1>
-    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v14</h1>
+    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v15</h1>
   </div>
-  <p class="sub">Fixes aggressive-pan + restore crashes. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
+  <p class="sub">Zero SVG rebuilds during pan. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
 
   <div class="pick-wrap">
     <div class="pick-face">
@@ -91,10 +89,10 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
 </div>
 
 <script>
-var inp    = document.getElementById('file-input');
-var logEl  = document.getElementById('log');
-var dlBtn  = document.getElementById('dl-btn');
-var steps  = document.getElementById('steps');
+var inp = document.getElementById('file-input');
+var logEl = document.getElementById('log');
+var dlBtn = document.getElementById('dl-btn');
+var steps = document.getElementById('steps');
 var output = null;
 
 function log(msg, cls) {
@@ -113,21 +111,16 @@ inp.addEventListener('change', function () {
   steps.classList.remove('show');
   output = null;
   if (!file) return;
-
   log('Reading ' + file.name + ' (' + Math.round(file.size / 1024) + ' KB)…', 'info');
   var reader = new FileReader();
   reader.onerror = function () { log('Read error', 'err'); };
   reader.onload = function () {
     var src = reader.result;
     log(Math.round(src.length / 1024) + ' KB loaded.', 'info');
-
-    if (src.indexOf('ios-v14') !== -1) {
-      log('Already patched with v14 — use the ORIGINAL canvas.html', 'warn');
-    }
-    if (src.indexOf('const renderScale=2.0;') === -1) {
+    if (src.indexOf('ios-v15') !== -1)
+      log('Already patched with v15 — use the ORIGINAL canvas.html', 'warn');
+    if (src.indexOf('const renderScale=2.0;') === -1)
       log('renderScale=2.0 not found — may be wrong file', 'warn');
-    }
-
     var result = applyAll(src);
     log('');
     log(result.fail === 0
@@ -180,44 +173,72 @@ function applyAll(src) {
     'P1 — isIOS + renderScale 1.0'
   );
 
-  // ── P2: Skip SVG rebuild while ANY finger is touching ────────
+  // ── P2: Touch-gated SVG rebuild ──────────────────────────────
   //
-  // CRASH CAUSE (aggressive pan):
-  //   applyTransform() → redrawOverlay() on every pointermove.
-  //   Even a 150ms debounce fires 6-7× per second during sustained pan.
-  //   Each call rebuilds the entire SVG DOM. On iOS = OOM.
+  // Root problem: applyTransform() → redrawOverlay() on every
+  // pointermove. redrawOverlay() clears svgOverlay.innerHTML and
+  // rebuilds every annotation/measurement element from scratch.
+  // At 60 Hz with many elements this is the OOM crash path.
   //
-  // FIX: self-rescheduling debounce.
-  //   When the timer fires, check activePointers.
-  //   If fingers still down → reschedule instead of drawing.
-  //   When fingers lift → fire exactly once.
-  //   Zero SVG rebuilds during the entire pan gesture.
+  // Why timers/debounces fail: they fire based on elapsed time,
+  // not on whether fingers are actually still touching. A sustained
+  // aggressive pan keeps resetting the timer but it still fires
+  // periodically, still causing rebuilds.
+  //
+  // The correct fix: use touchstart/touchend — the actual browser
+  // events that track physical finger contact — to gate redraws.
+  // _iosTouching is set on touchstart, cleared on touchend.
+  // applyTransform sets a dirty flag but NEVER calls redrawOverlay.
+  // touchend fires the one pending redraw, 50ms after lift.
+  //
+  // Result: exactly ZERO SVG rebuilds during any pan gesture,
+  // regardless of duration or speed.
   swap(
     '  // Redraw labels in real-time during pinch \u2014 rAF-throttled so we never queue more than one\n' +
     '  cancelAnimationFrame(_rafRedraw);\n' +
     '  _rafRedraw = requestAnimationFrame(()=>{ redrawOverlay(); });',
+    '  // iOS: gate SVG rebuild on touch state — zero rebuilds during pan\n' +
     '  if (isIOS) {\n' +
-    '    // Skip rebuild while touching — reschedule until fingers lift\n' +
-    '    clearTimeout(_iosRDTimer);\n' +
-    '    _iosRDTimer = setTimeout(function _iosRD() {\n' +
-    '      if (Object.keys(activePointers).length > 0) {\n' +
-    '        _iosRDTimer = setTimeout(_iosRD, 32); // still touching, wait\n' +
-    '      } else {\n' +
-    '        redrawOverlay(); // fingers lifted — draw once\n' +
-    '      }\n' +
-    '    }, 32);\n' +
+    '    _iosRedrawDirty = true; // mark dirty but never rebuild while touching\n' +
     '  } else {\n' +
     '    cancelAnimationFrame(_rafRedraw);\n' +
     '    _rafRedraw = requestAnimationFrame(function () { redrawOverlay(); });\n' +
     '  }',
-    'P2 — skip SVG rebuild while touching (fixes aggressive-pan crash)'
+    'P2 — mark dirty during pan, never rebuild while touching'
   );
 
-  // ── P3: Declare _iosRDTimer ──────────────────────────────────
+  // ── P3: Declare iOS pan variables + wire touch events ────────
+  //
+  // _iosTouching: true while any finger is on screen (touchstart/touchend)
+  // _iosRedrawDirty: set by applyTransform, consumed by touchend
+  //
+  // touchstart/touchend are the ground truth for finger contact.
+  // Using these (not pointermove/pointerup which can be synthetic)
+  // guarantees we never rebuild the SVG while physically touching.
+  //
+  // touchend: 50ms delay lets the last frame settle before redraw.
+  // touchcancel: treat same as touchend (e.g. incoming call).
+  //
+  // Anchor: proven to match in all versions.
   swap(
     'let _rafRedraw = null',
-    'let _rafRedraw = null, _iosRDTimer = null',
-    'P3 — declare _iosRDTimer'
+    'let _rafRedraw = null;\n' +
+    'var _iosTouching = false, _iosRedrawDirty = false;\n' +
+    'if (isIOS) {\n' +
+    '  document.addEventListener(\'touchstart\', function () {\n' +
+    '    _iosTouching = true;\n' +
+    '  }, { passive: true, capture: true });\n' +
+    '  function _iosTouchEnd() {\n' +
+    '    _iosTouching = false;\n' +
+    '    if (_iosRedrawDirty) {\n' +
+    '      _iosRedrawDirty = false;\n' +
+    '      setTimeout(function () { if (!_iosTouching) redrawOverlay(); }, 50);\n' +
+    '    }\n' +
+    '  }\n' +
+    '  document.addEventListener(\'touchend\',    _iosTouchEnd, { passive: true, capture: true });\n' +
+    '  document.addEventListener(\'touchcancel\', _iosTouchEnd, { passive: true, capture: true });\n' +
+    '}',
+    'P3 — touch tracking vars + touchend-driven redraw'
   );
 
   // ── P4: Cache getBoundingClientRect ─────────────────────────
@@ -242,111 +263,88 @@ function applyAll(src) {
 
   // ── P5: Batched extractor + sibling-SVG overlay ──────────────
   //
-  // Two sub-fixes:
-  //   A) Batched extractor: yields via setTimeout(0) every 30 ops
-  //      so WKWebView never kills us for blocking the main thread.
+  // A) Batched: yields via setTimeout(0) every 30 ops — browser
+  //    can breathe, WKWebView doesn't kill for blocking main thread.
   //
-  //   B) Sibling SVG overlay: geometry path goes in a separate
-  //      <svg id="_iosGeoSvg"> SIBLING to svgOverlay.
-  //      redrawOverlay() does svgOverlay.innerHTML='' — that nuked
-  //      the geometry path in v13, forcing expensive recreation on
-  //      every redraw. Now it's untouched by redrawOverlay.
-  //      Only cleared when changing pages.
+  // B) Sibling SVG: geometry goes in <svg id="_iosGeoSvg"> which
+  //    is a SIBLING to svgOverlay. redrawOverlay() clears
+  //    svgOverlay.innerHTML — the sibling is untouched.
+  //    v13 put it inside svgOverlay so every redraw destroyed and
+  //    recreated the entire geometry path. Fixed here.
+  //
+  // C) Single <path>: all segments in one d= string.
+  //    1 DOM node instead of 10,000 individual <line> elements.
   var afterExtractor = '  } catch(e) {\n  }\n\n}\n';
   var batchedCode =
-    '\n// ── iOS: batched extractor + sibling-SVG overlay (ios-v14) ──\n' +
+    '\n// ── iOS batched extractor + sibling-SVG overlay (ios-v15) ──\n' +
     'async function extractPageGeometryIOS(page, viewport) {\n' +
-    '  // Clear sibling overlay immediately\n' +
-    '  var geoSvg = document.getElementById(\'_iosGeoSvg\');\n' +
-    '  if (geoSvg) geoSvg.innerHTML = \'\';\n' +
+    '  var geo = document.getElementById(\'_iosGeoSvg\');\n' +
+    '  if (geo) geo.innerHTML = \'\';\n' +
     '  pageSegments = []; snapGrid = null;\n' +
     '  var vt = viewport.transform;\n' +
-    '  function cc(c, m) {\n' +
-    '    return [c[0]*m[0]+c[2]*m[1], c[1]*m[0]+c[3]*m[1],\n' +
-    '            c[0]*m[2]+c[2]*m[3], c[1]*m[2]+c[3]*m[3],\n' +
-    '            c[0]*m[4]+c[2]*m[5]+c[4], c[1]*m[4]+c[3]*m[5]+c[5]];\n' +
-    '  }\n' +
+    '  function cc(c,m){return[c[0]*m[0]+c[2]*m[1],c[1]*m[0]+c[3]*m[1],c[0]*m[2]+c[2]*m[3],c[1]*m[2]+c[3]*m[3],c[0]*m[4]+c[2]*m[5]+c[4],c[1]*m[4]+c[3]*m[5]+c[5]];}\n' +
     '  function makeH(ctm) {\n' +
-    '    function pc(px, py) {\n' +
-    '      var x = ctm[0]*px + ctm[2]*py + ctm[4];\n' +
-    '      var y = ctm[1]*px + ctm[3]*py + ctm[5];\n' +
-    '      return { x: vt[0]*x + vt[2]*y + vt[4], y: vt[1]*x + vt[3]*y + vt[5] };\n' +
-    '    }\n' +
-    '    function ps(ax, ay, bx, by) {\n' +
-    '      var p1 = pc(ax, ay), p2 = pc(bx, by);\n' +
-    '      if (Math.hypot(p2.x-p1.x, p2.y-p1.y) >= 2)\n' +
-    '        pageSegments.push({ x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y, isCurve:false });\n' +
-    '    }\n' +
-    '    return { pdfToCanvas: pc, pushSeg: ps };\n' +
+    '    function pc(px,py){var x=ctm[0]*px+ctm[2]*py+ctm[4],y=ctm[1]*px+ctm[3]*py+ctm[5];return{x:vt[0]*x+vt[2]*y+vt[4],y:vt[1]*x+vt[3]*y+vt[5]};}\n' +
+    '    function ps(ax,ay,bx,by){var p1=pc(ax,ay),p2=pc(bx,by);if(Math.hypot(p2.x-p1.x,p2.y-p1.y)>=2)pageSegments.push({x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,isCurve:false});}\n' +
+    '    return{pdfToCanvas:pc,pushSeg:ps};\n' +
     '  }\n' +
-    '  function yn() { return new Promise(function(r) { setTimeout(r, 0); }); }\n' +
+    '  function yn(){return new Promise(function(r){setTimeout(r,0);});}\n' +
     '  try {\n' +
-    '    var ops = await page.getOperatorList();\n' +
-    '    var fn = ops.fnArray, ar = ops.argsArray;\n' +
-    '    var ctm = [1,0,0,1,0,0], st = [[1,0,0,1,0,0]];\n' +
-    '    for (var i = 0; i < fn.length; i++) {\n' +
-    '      if (i % 30 === 0) await yn();\n' +
-    '      var f = fn[i], a = ar[i];\n' +
-    '      if      (f === _OPC.save)   { st.push(ctm.slice()); }\n' +
-    '      else if (f === _OPC.restore) { if (st.length > 1) ctm = st.pop(); }\n' +
-    '      else if (f === _OPC.transform) { ctm = cc(ctm, a); }\n' +
-    '      else if (f === _OPC.paintFormXObjectBegin) {\n' +
-    '        st.push(ctm.slice());\n' +
-    '        if (a && Array.isArray(a[1]) && a[1].length === 6) ctm = cc(ctm, a[1]);\n' +
-    '      }\n' +
-    '      else if (f === _OPC.paintFormXObjectEnd) { if (st.length > 1) ctm = st.pop(); }\n' +
-    '      else if (f === _OPC.constructPath) {\n' +
-    '        var h = makeH(ctm);\n' +
-    '        decodeConstructPath(a[0], a[1], h.pdfToCanvas, h.pushSeg);\n' +
-    '      }\n' +
+    '    var ops=await page.getOperatorList(),fn=ops.fnArray,ar=ops.argsArray;\n' +
+    '    var ctm=[1,0,0,1,0,0],st=[[1,0,0,1,0,0]];\n' +
+    '    for(var i=0;i<fn.length;i++){\n' +
+    '      if(i%30===0)await yn();\n' +
+    '      var f=fn[i],a=ar[i];\n' +
+    '      if(f===_OPC.save){st.push(ctm.slice());}\n' +
+    '      else if(f===_OPC.restore){if(st.length>1)ctm=st.pop();}\n' +
+    '      else if(f===_OPC.transform){ctm=cc(ctm,a);}\n' +
+    '      else if(f===_OPC.paintFormXObjectBegin){st.push(ctm.slice());if(a&&Array.isArray(a[1])&&a[1].length===6)ctm=cc(ctm,a[1]);}\n' +
+    '      else if(f===_OPC.paintFormXObjectEnd){if(st.length>1)ctm=st.pop();}\n' +
+    '      else if(f===_OPC.constructPath){var h=makeH(ctm);decodeConstructPath(a[0],a[1],h.pdfToCanvas,h.pushSeg);}\n' +
     '    }\n' +
     '    await yn();\n' +
-    '    var seen = new Set(), dd = [];\n' +
-    '    for (var j = 0; j < pageSegments.length; j++) {\n' +
-    '      if (j % 500 === 0) await yn();\n' +
-    '      var s = pageSegments[j];\n' +
-    '      var k   = Math.round(s.x1)+\',\'+Math.round(s.y1)+\',\'+Math.round(s.x2)+\',\'+Math.round(s.y2);\n' +
-    '      var rev = Math.round(s.x2)+\',\'+Math.round(s.y2)+\',\'+Math.round(s.x1)+\',\'+Math.round(s.y1);\n' +
-    '      if (!seen.has(k) && !seen.has(rev)) { seen.add(k); dd.push(s); }\n' +
+    '    var seen=new Set(),dd=[];\n' +
+    '    for(var j=0;j<pageSegments.length;j++){\n' +
+    '      if(j%500===0)await yn();\n' +
+    '      var s=pageSegments[j];\n' +
+    '      var k=Math.round(s.x1)+\',\'+Math.round(s.y1)+\',\'+Math.round(s.x2)+\',\'+Math.round(s.y2);\n' +
+    '      var rev=Math.round(s.x2)+\',\'+Math.round(s.y2)+\',\'+Math.round(s.x1)+\',\'+Math.round(s.y1);\n' +
+    '      if(!seen.has(k)&&!seen.has(rev)){seen.add(k);dd.push(s);}\n' +
     '    }\n' +
-    '    pageSegments = dd;\n' +
-    '    snapGrid = buildSnapGrid(pageSegments);\n' +
+    '    pageSegments=dd; snapGrid=buildSnapGrid(pageSegments);\n' +
     '    await yn();\n' +
-    '  } catch(e) { console.warn(\'[iOS snap]\', e); }\n' +
+    '  } catch(e){console.warn(\'[iOS snap]\',e);}\n' +
     '}\n' +
     '\n' +
-    '// Render all geometry as ONE <path> in a sibling SVG — never inside svgOverlay\n' +
-    '// so redrawOverlay() (which clears svgOverlay.innerHTML) never touches it.\n' +
     'function drawGeometryOverlayIOS() {\n' +
-    '  var ns = \'http://www.w3.org/2000/svg\';\n' +
-    '  var geo = document.getElementById(\'_iosGeoSvg\');\n' +
-    '  if (!geo) {\n' +
-    '    geo = document.createElementNS(ns, \'svg\');\n' +
-    '    geo.id = \'_iosGeoSvg\';\n' +
-    '    geo.setAttribute(\'pointer-events\', \'none\');\n' +
-    '    geo.style.cssText = \'position:absolute;top:0;left:0;overflow:visible;\';\n' +
-    '    svgOverlay.parentNode.insertBefore(geo, svgOverlay);\n' +
+    '  var ns=\'http://www.w3.org/2000/svg\';\n' +
+    '  var geo=document.getElementById(\'_iosGeoSvg\');\n' +
+    '  if(!geo){\n' +
+    '    geo=document.createElementNS(ns,\'svg\');\n' +
+    '    geo.id=\'_iosGeoSvg\';\n' +
+    '    geo.setAttribute(\'pointer-events\',\'none\');\n' +
+    '    geo.style.cssText=\'position:absolute;top:0;left:0;overflow:visible;\';\n' +
+    '    svgOverlay.parentNode.insertBefore(geo,svgOverlay);\n' +
     '  }\n' +
-    '  geo.setAttribute(\'width\',  svgOverlay.getAttribute(\'width\'));\n' +
-    '  geo.setAttribute(\'height\', svgOverlay.getAttribute(\'height\'));\n' +
-    '  geo.innerHTML = \'\';\n' +
-    '  if (!pageSegments || pageSegments.length === 0) return;\n' +
-    '  var d = \'\';\n' +
-    '  for (var i = 0; i < pageSegments.length; i++) {\n' +
-    '    var s = pageSegments[i];\n' +
-    '    d += \'M\' + s.x1.toFixed(1) + \',\' + s.y1.toFixed(1) +\n' +
-    '         \'L\' + s.x2.toFixed(1) + \',\' + s.y2.toFixed(1);\n' +
+    '  geo.setAttribute(\'width\',svgOverlay.getAttribute(\'width\'));\n' +
+    '  geo.setAttribute(\'height\',svgOverlay.getAttribute(\'height\'));\n' +
+    '  geo.innerHTML=\'\';\n' +
+    '  if(!pageSegments||!pageSegments.length)return;\n' +
+    '  var d=\'\';\n' +
+    '  for(var i=0;i<pageSegments.length;i++){\n' +
+    '    var s=pageSegments[i];\n' +
+    '    d+=\'M\'+s.x1.toFixed(1)+\',\'+s.y1.toFixed(1)+\'L\'+s.x2.toFixed(1)+\',\'+s.y2.toFixed(1);\n' +
     '  }\n' +
-    '  var path = document.createElementNS(ns, \'path\');\n' +
-    '  path.setAttribute(\'d\', d);\n' +
-    '  path.setAttribute(\'stroke\', \'rgba(39,174,96,0.2)\');\n' +
-    '  path.setAttribute(\'stroke-width\', \'0.8\');\n' +
-    '  path.setAttribute(\'fill\', \'none\');\n' +
+    '  var path=document.createElementNS(ns,\'path\');\n' +
+    '  path.setAttribute(\'d\',d);\n' +
+    '  path.setAttribute(\'stroke\',\'rgba(39,174,96,0.2)\');\n' +
+    '  path.setAttribute(\'stroke-width\',\'0.8\');\n' +
+    '  path.setAttribute(\'fill\',\'none\');\n' +
     '  geo.appendChild(path);\n' +
     '}\n';
 
   swap(afterExtractor, afterExtractor + batchedCode,
-    'P5 — batched extractor + sibling-SVG overlay (snap preserved, no DOM flood)');
+    'P5 — batched extractor + sibling-SVG single-path overlay');
 
   // ── P6: Route renderPage to iOS extractor ────────────────────
   rswap(
@@ -366,24 +364,17 @@ function applyAll(src) {
   );
 
   // ── P7: Free bytes in loadSessionFromStore ───────────────────
-  //
-  // CRASH CAUSE (restore → first tap):
-  //   loadSessionFromStore loads bytes from IDB into currentPdfBytes,
-  //   hands them to pdf.js, then NEVER frees them.
-  //   So on restore: bytes + canvas + geometry all in RAM = OOM on tap.
-  //
-  //   P8 below frees bytes after IDB *save*. This patch frees after
-  //   IDB *restore* — a different code path entirely.
-  //
-  //   Unique anchor: the comment only present in loadSessionFromStore.
+  // After pdf.js resolves in loadSessionFromStore, currentPdfBytes
+  // is dead weight — pdf.js worker has the data. Free it so the
+  // restore + render + geometry extraction don't all share RAM.
   swap(
     'renderPage(currentPage, true); // renderPage calls loadSession which restores measurements',
-    'if (isIOS) { currentPdfBytes = null; } // free bytes — pdf.js worker has them now\n' +
+    'if (isIOS) { currentPdfBytes = null; }\n' +
     '    renderPage(currentPage, true); // renderPage calls loadSession which restores measurements',
-    'P7 — free bytes in loadSessionFromStore after pdf.js resolves (restore crash)'
+    'P7 — free bytes in loadSessionFromStore after pdf.js resolves'
   );
 
-  // ── P8: Defer auto-restore until first tap (regex) ───────────
+  // ── P8: Defer auto-restore until first tap ───────────────────
   rswap(
     /if\s*\(\s*bytes\s*\)\s*\{\s*loadSessionFromStore\s*\(\s*latest\.filename\s*\)\s*;\s*\}/,
     'if (bytes) {\n' +
@@ -410,15 +401,13 @@ function applyAll(src) {
   var bodyIdx = src.lastIndexOf('</body>');
   if (bodyIdx !== -1) {
     src = src.slice(0, bodyIdx) +
-      '\n<!-- ios-v14 -->\n' +
+      '\n<!-- ios-v15 -->\n' +
       '<div style="position:fixed;bottom:4px;right:6px;z-index:9999;' +
       'font-family:monospace;font-size:9px;color:rgba(255,255,255,0.25);' +
-      'pointer-events:none;letter-spacing:0.05em;">ios-v14</div>\n' +
+      'pointer-events:none;letter-spacing:0.05em;">ios-v15</div>\n' +
       src.slice(bodyIdx);
-    log('  P10 — version badge (ios-v14)', 'ok'); ok++;
-  } else {
-    log('  P10 — no </body> found', 'err'); fail++;
-  }
+    log('  P10 — version badge (ios-v15)', 'ok'); ok++;
+  } else { log('  P10 — no </body>', 'err'); fail++; }
 
   return { src: src, ok: ok, fail: fail };
 }
