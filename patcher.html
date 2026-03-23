@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MeasurePDF iOS Patcher v13</title>
+<title>MeasurePDF iOS Patcher v14</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -58,9 +58,9 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   </div>
   <div>
     <h1>Modern <span>Measure</span></h1>
-    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v13</h1>
+    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v14</h1>
   </div>
-  <p class="sub">Batched snap extraction + single-path overlay on iOS. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
+  <p class="sub">Fixes aggressive-pan + restore crashes. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
 
   <div class="pick-wrap">
     <div class="pick-face">
@@ -121,8 +121,8 @@ inp.addEventListener('change', function () {
     var src = reader.result;
     log(Math.round(src.length / 1024) + ' KB loaded.', 'info');
 
-    if (src.indexOf('ios-v13') !== -1) {
-      log('Already patched with v13 — use the ORIGINAL canvas.html', 'warn');
+    if (src.indexOf('ios-v14') !== -1) {
+      log('Already patched with v14 — use the ORIGINAL canvas.html', 'warn');
     }
     if (src.indexOf('const renderScale=2.0;') === -1) {
       log('renderScale=2.0 not found — may be wrong file', 'warn');
@@ -156,7 +156,6 @@ dlBtn.addEventListener('click', function () {
   }
 });
 
-// ─────────────────────────────────────────────────────────────
 function applyAll(src) {
   var ok = 0, fail = 0;
 
@@ -166,7 +165,6 @@ function applyAll(src) {
     src = src.slice(0, i) + replacement + src.slice(i + anchor.length);
     log('  ' + label, 'ok'); ok++; return true;
   }
-
   function rswap(re, replacement, label) {
     if (!re.test(src)) { log('  ' + label + ' — not found', 'err'); fail++; return false; }
     src = src.replace(re, replacement);
@@ -182,19 +180,37 @@ function applyAll(src) {
     'P1 — isIOS + renderScale 1.0'
   );
 
-  // ── P2: Debounce SVG rebuild during pan ──────────────────────
+  // ── P2: Skip SVG rebuild while ANY finger is touching ────────
+  //
+  // CRASH CAUSE (aggressive pan):
+  //   applyTransform() → redrawOverlay() on every pointermove.
+  //   Even a 150ms debounce fires 6-7× per second during sustained pan.
+  //   Each call rebuilds the entire SVG DOM. On iOS = OOM.
+  //
+  // FIX: self-rescheduling debounce.
+  //   When the timer fires, check activePointers.
+  //   If fingers still down → reschedule instead of drawing.
+  //   When fingers lift → fire exactly once.
+  //   Zero SVG rebuilds during the entire pan gesture.
   swap(
     '  // Redraw labels in real-time during pinch \u2014 rAF-throttled so we never queue more than one\n' +
     '  cancelAnimationFrame(_rafRedraw);\n' +
     '  _rafRedraw = requestAnimationFrame(()=>{ redrawOverlay(); });',
     '  if (isIOS) {\n' +
+    '    // Skip rebuild while touching — reschedule until fingers lift\n' +
     '    clearTimeout(_iosRDTimer);\n' +
-    '    _iosRDTimer = setTimeout(function () { redrawOverlay(); }, 150);\n' +
+    '    _iosRDTimer = setTimeout(function _iosRD() {\n' +
+    '      if (Object.keys(activePointers).length > 0) {\n' +
+    '        _iosRDTimer = setTimeout(_iosRD, 32); // still touching, wait\n' +
+    '      } else {\n' +
+    '        redrawOverlay(); // fingers lifted — draw once\n' +
+    '      }\n' +
+    '    }, 32);\n' +
     '  } else {\n' +
     '    cancelAnimationFrame(_rafRedraw);\n' +
     '    _rafRedraw = requestAnimationFrame(function () { redrawOverlay(); });\n' +
     '  }',
-    'P2 — debounce SVG redraw during pan'
+    'P2 — skip SVG rebuild while touching (fixes aggressive-pan crash)'
   );
 
   // ── P3: Declare _iosRDTimer ──────────────────────────────────
@@ -224,27 +240,25 @@ function applyAll(src) {
     'P4 — cache getBoundingClientRect'
   );
 
-  // ── P5: iOS batched extractor + single-path overlay ──────────
+  // ── P5: Batched extractor + sibling-SVG overlay ──────────────
   //
-  // WHY the original crashed:
-  //   extractPageGeometry() runs synchronously in one giant loop.
-  //   drawGeometryOverlay() creates one SVG <line> per segment —
-  //   10,000 segments = 10,000 DOM nodes = ~15 MB of DOM overhead.
-  //   Combined with currentPdfBytes + canvas during restore = OOM.
+  // Two sub-fixes:
+  //   A) Batched extractor: yields via setTimeout(0) every 30 ops
+  //      so WKWebView never kills us for blocking the main thread.
   //
-  // The fix has two parts:
-  //   A) Batched extractor: yields to the browser every 30 operators
-  //      via setTimeout(0), so the main thread never blocks long enough
-  //      to trigger WKWebView's memory pressure kill.
-  //   B) Single-path overlay: all segments concatenated into one
-  //      SVG <path> d= string — 1 DOM node instead of 10,000.
-  //      Same visual result, ~100x less DOM memory.
-  //
-  // Injected after the closing brace of extractPageGeometry (reliable anchor).
+  //   B) Sibling SVG overlay: geometry path goes in a separate
+  //      <svg id="_iosGeoSvg"> SIBLING to svgOverlay.
+  //      redrawOverlay() does svgOverlay.innerHTML='' — that nuked
+  //      the geometry path in v13, forcing expensive recreation on
+  //      every redraw. Now it's untouched by redrawOverlay.
+  //      Only cleared when changing pages.
   var afterExtractor = '  } catch(e) {\n  }\n\n}\n';
   var batchedCode =
-    '\n// ── iOS: batched extractor + single-path overlay (ios-v13) ──\n' +
+    '\n// ── iOS: batched extractor + sibling-SVG overlay (ios-v14) ──\n' +
     'async function extractPageGeometryIOS(page, viewport) {\n' +
+    '  // Clear sibling overlay immediately\n' +
+    '  var geoSvg = document.getElementById(\'_iosGeoSvg\');\n' +
+    '  if (geoSvg) geoSvg.innerHTML = \'\';\n' +
     '  pageSegments = []; snapGrid = null;\n' +
     '  var vt = viewport.transform;\n' +
     '  function cc(c, m) {\n' +
@@ -271,9 +285,9 @@ function applyAll(src) {
     '    var fn = ops.fnArray, ar = ops.argsArray;\n' +
     '    var ctm = [1,0,0,1,0,0], st = [[1,0,0,1,0,0]];\n' +
     '    for (var i = 0; i < fn.length; i++) {\n' +
-    '      if (i % 30 === 0) await yn(); // yield every 30 ops\n' +
+    '      if (i % 30 === 0) await yn();\n' +
     '      var f = fn[i], a = ar[i];\n' +
-    '      if (f === _OPC.save) { st.push(ctm.slice()); }\n' +
+    '      if      (f === _OPC.save)   { st.push(ctm.slice()); }\n' +
     '      else if (f === _OPC.restore) { if (st.length > 1) ctm = st.pop(); }\n' +
     '      else if (f === _OPC.transform) { ctm = cc(ctm, a); }\n' +
     '      else if (f === _OPC.paintFormXObjectBegin) {\n' +
@@ -287,12 +301,11 @@ function applyAll(src) {
     '      }\n' +
     '    }\n' +
     '    await yn();\n' +
-    '    // Deduplicate\n' +
     '    var seen = new Set(), dd = [];\n' +
     '    for (var j = 0; j < pageSegments.length; j++) {\n' +
     '      if (j % 500 === 0) await yn();\n' +
     '      var s = pageSegments[j];\n' +
-    '      var k = Math.round(s.x1)+\',\'+Math.round(s.y1)+\',\'+Math.round(s.x2)+\',\'+Math.round(s.y2);\n' +
+    '      var k   = Math.round(s.x1)+\',\'+Math.round(s.y1)+\',\'+Math.round(s.x2)+\',\'+Math.round(s.y2);\n' +
     '      var rev = Math.round(s.x2)+\',\'+Math.round(s.y2)+\',\'+Math.round(s.x1)+\',\'+Math.round(s.y1);\n' +
     '      if (!seen.has(k) && !seen.has(rev)) { seen.add(k); dd.push(s); }\n' +
     '    }\n' +
@@ -302,37 +315,40 @@ function applyAll(src) {
     '  } catch(e) { console.warn(\'[iOS snap]\', e); }\n' +
     '}\n' +
     '\n' +
+    '// Render all geometry as ONE <path> in a sibling SVG — never inside svgOverlay\n' +
+    '// so redrawOverlay() (which clears svgOverlay.innerHTML) never touches it.\n' +
     'function drawGeometryOverlayIOS() {\n' +
-    '  // Remove any old overlay\n' +
-    '  var old = document.getElementById(\'_iosGeoPath\');\n' +
-    '  if (old) old.remove();\n' +
+    '  var ns = \'http://www.w3.org/2000/svg\';\n' +
+    '  var geo = document.getElementById(\'_iosGeoSvg\');\n' +
+    '  if (!geo) {\n' +
+    '    geo = document.createElementNS(ns, \'svg\');\n' +
+    '    geo.id = \'_iosGeoSvg\';\n' +
+    '    geo.setAttribute(\'pointer-events\', \'none\');\n' +
+    '    geo.style.cssText = \'position:absolute;top:0;left:0;overflow:visible;\';\n' +
+    '    svgOverlay.parentNode.insertBefore(geo, svgOverlay);\n' +
+    '  }\n' +
+    '  geo.setAttribute(\'width\',  svgOverlay.getAttribute(\'width\'));\n' +
+    '  geo.setAttribute(\'height\', svgOverlay.getAttribute(\'height\'));\n' +
+    '  geo.innerHTML = \'\';\n' +
     '  if (!pageSegments || pageSegments.length === 0) return;\n' +
-    '  // Build one <path> d= string — 1 DOM node for all segments\n' +
     '  var d = \'\';\n' +
     '  for (var i = 0; i < pageSegments.length; i++) {\n' +
     '    var s = pageSegments[i];\n' +
     '    d += \'M\' + s.x1.toFixed(1) + \',\' + s.y1.toFixed(1) +\n' +
     '         \'L\' + s.x2.toFixed(1) + \',\' + s.y2.toFixed(1);\n' +
     '  }\n' +
-    '  var ns = \'http://www.w3.org/2000/svg\';\n' +
     '  var path = document.createElementNS(ns, \'path\');\n' +
-    '  path.id = \'_iosGeoPath\';\n' +
     '  path.setAttribute(\'d\', d);\n' +
     '  path.setAttribute(\'stroke\', \'rgba(39,174,96,0.2)\');\n' +
     '  path.setAttribute(\'stroke-width\', \'0.8\');\n' +
     '  path.setAttribute(\'fill\', \'none\');\n' +
-    '  path.setAttribute(\'pointer-events\', \'none\');\n' +
-    '  svgOverlay.insertBefore(path, svgOverlay.firstChild);\n' +
+    '  geo.appendChild(path);\n' +
     '}\n';
 
-  if (!swap(afterExtractor, afterExtractor + batchedCode, 'P5 — batched extractor + single-path overlay')) {
-    // already reported as failed
-  }
+  swap(afterExtractor, afterExtractor + batchedCode,
+    'P5 — batched extractor + sibling-SVG overlay (snap preserved, no DOM flood)');
 
-  // ── P6: Use iOS extractor in renderPage ──────────────────────
-  // Replace the extractPageGeometry call inside renderPage with a
-  // branch: iOS uses the batched version + single-path overlay,
-  // desktop uses the original.
+  // ── P6: Route renderPage to iOS extractor ────────────────────
   rswap(
     /extractPageGeometry\(page,\s*vp\)\.then\(\s*\(\)\s*=>\s*\{[\s\S]*?if\s*\(snapEnabled\)\s*drawGeometryOverlay\(\);\s*\}\s*\}\s*\);/,
     'if (isIOS) {\n' +
@@ -346,10 +362,28 @@ function applyAll(src) {
     '        }\n' +
     '        });\n' +
     '      }',
-    'P6 — route iOS to batched extractor in renderPage'
+    'P6 — route renderPage to iOS extractor'
   );
 
-  // ── P7: Defer auto-restore until first tap (regex) ───────────
+  // ── P7: Free bytes in loadSessionFromStore ───────────────────
+  //
+  // CRASH CAUSE (restore → first tap):
+  //   loadSessionFromStore loads bytes from IDB into currentPdfBytes,
+  //   hands them to pdf.js, then NEVER frees them.
+  //   So on restore: bytes + canvas + geometry all in RAM = OOM on tap.
+  //
+  //   P8 below frees bytes after IDB *save*. This patch frees after
+  //   IDB *restore* — a different code path entirely.
+  //
+  //   Unique anchor: the comment only present in loadSessionFromStore.
+  swap(
+    'renderPage(currentPage, true); // renderPage calls loadSession which restores measurements',
+    'if (isIOS) { currentPdfBytes = null; } // free bytes — pdf.js worker has them now\n' +
+    '    renderPage(currentPage, true); // renderPage calls loadSession which restores measurements',
+    'P7 — free bytes in loadSessionFromStore after pdf.js resolves (restore crash)'
+  );
+
+  // ── P8: Defer auto-restore until first tap (regex) ───────────
   rswap(
     /if\s*\(\s*bytes\s*\)\s*\{\s*loadSessionFromStore\s*\(\s*latest\.filename\s*\)\s*;\s*\}/,
     'if (bytes) {\n' +
@@ -362,28 +396,28 @@ function applyAll(src) {
     '          loadSessionFromStore(latest.filename);\n' +
     '        }\n' +
     '      }',
-    'P7 — defer auto-restore until first tap'
+    'P8 — defer auto-restore until first tap'
   );
 
-  // ── P8: Free PDF bytes after IDB save (regex) ────────────────
+  // ── P9: Free bytes after IDB save ────────────────────────────
   rswap(
     /tx\.oncomplete\s*=\s*\(\)\s*=>\s*res\(true\);/,
     'tx.oncomplete = () => { if (isIOS) { currentPdfBytes = null; } res(true); };',
-    'P8 — free PDF bytes after IDB save'
+    'P9 — free bytes after IDB save'
   );
 
-  // ── P9: Version badge ────────────────────────────────────────
+  // ── P10: Version badge ───────────────────────────────────────
   var bodyIdx = src.lastIndexOf('</body>');
   if (bodyIdx !== -1) {
     src = src.slice(0, bodyIdx) +
-      '\n<!-- ios-v13 -->\n' +
+      '\n<!-- ios-v14 -->\n' +
       '<div style="position:fixed;bottom:4px;right:6px;z-index:9999;' +
       'font-family:monospace;font-size:9px;color:rgba(255,255,255,0.25);' +
-      'pointer-events:none;letter-spacing:0.05em;">ios-v13</div>\n' +
+      'pointer-events:none;letter-spacing:0.05em;">ios-v14</div>\n' +
       src.slice(bodyIdx);
-    log('  P9 — version badge (ios-v13)', 'ok'); ok++;
+    log('  P10 — version badge (ios-v14)', 'ok'); ok++;
   } else {
-    log('  P9 — no </body> found', 'err'); fail++;
+    log('  P10 — no </body> found', 'err'); fail++;
   }
 
   return { src: src, ok: ok, fail: fail };
