@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MeasurePDF iOS Patcher v11</title>
+<title>MeasurePDF iOS Patcher v12</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -58,7 +58,7 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   </div>
   <div>
     <h1>Modern <span>Measure</span></h1>
-    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v11</h1>
+    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v12</h1>
   </div>
   <p class="sub">Fixes fast-pan, refresh/restore, and second-document crashes. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
 
@@ -121,8 +121,8 @@ inp.addEventListener('change', function () {
     var src = reader.result;
     log(Math.round(src.length / 1024) + ' KB loaded.', 'info');
 
-    if (src.indexOf('ios-v11') !== -1) {
-      log('Already patched with v11 — use the ORIGINAL canvas.html', 'warn');
+    if (src.indexOf('ios-v12') !== -1) {
+      log('Already patched with v12 — use the ORIGINAL canvas.html', 'warn');
     }
     if (src.indexOf('const renderScale=2.0;') === -1) {
       log('renderScale=2.0 not found — may be wrong file', 'warn');
@@ -159,6 +159,7 @@ dlBtn.addEventListener('click', function () {
 function applyAll(src) {
   var ok = 0, fail = 0;
 
+  // Exact string swap
   function swap(anchor, replacement, label) {
     var i = src.indexOf(anchor);
     if (i === -1) { log('  ' + label + ' — anchor not found', 'err'); fail++; return false; }
@@ -166,7 +167,14 @@ function applyAll(src) {
     log('  ' + label, 'ok'); ok++; return true;
   }
 
-  // P1: isIOS + renderScale 1.0
+  // Regex swap — immune to whitespace variations
+  function rswap(re, replacement, label) {
+    if (!re.test(src)) { log('  ' + label + ' — not found', 'err'); fail++; return false; }
+    src = src.replace(re, replacement);
+    log('  ' + label, 'ok'); ok++; return true;
+  }
+
+  // ── P1: isIOS + renderScale 1.0 ─────────────────────────────
   swap(
     'const renderScale=2.0;',
     'const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||\n' +
@@ -175,7 +183,10 @@ function applyAll(src) {
     'P1 — isIOS + renderScale 1.0'
   );
 
-  // P2: debounce SVG rebuild during pan
+  // ── P2: Debounce SVG rebuild during pan ──────────────────────
+  // applyTransform fires redrawOverlay every pointermove at 60 Hz.
+  // redrawOverlay clears and rebuilds the entire SVG DOM from scratch.
+  // On iOS with many annotations = OOM crash during fast pan.
   swap(
     '  // Redraw labels in real-time during pinch \u2014 rAF-throttled so we never queue more than one\n' +
     '  cancelAnimationFrame(_rafRedraw);\n' +
@@ -190,14 +201,14 @@ function applyAll(src) {
     'P2 — debounce SVG redraw during pan'
   );
 
-  // P3: declare _iosRDTimer
+  // ── P3: Declare _iosRDTimer ──────────────────────────────────
   swap(
     'let _rafRedraw = null',
     'let _rafRedraw = null, _iosRDTimer = null',
     'P3 — declare _iosRDTimer'
   );
 
-  // P4: cache getBoundingClientRect
+  // ── P4: Cache getBoundingClientRect ─────────────────────────
   swap(
     'function screenToCanvas(sx,sy) {\n' +
     '  const r=canvasViewport.getBoundingClientRect();\n' +
@@ -217,90 +228,75 @@ function applyAll(src) {
     'P4 — cache getBoundingClientRect'
   );
 
-  // P5: version badge + iOS memory block as a SECOND <script> tag
-  // Injected just before </body> — completely separate from the main script,
-  // so there is zero risk of the HTML parser seeing <\/script> inside a string.
-  // Runs after the main script has finished executing.
+  // ── P5: Skip geometry extraction on iOS ─────────────────────
+  // THE MAIN CRASH CAUSE on restore/second-doc:
+  //
+  // extractPageGeometry() iterates every PDF drawing operator and builds
+  // pageSegments[] — potentially tens of thousands of objects.
+  // drawGeometryOverlay() then creates an individual SVG <line> element
+  // for EACH segment — the DOM alone can be 5-20 MB.
+  // This all happens during restore, while currentPdfBytes + the decoded
+  // PDF canvas are also in memory. Combined they exceed WKWebView's limit.
+  //
+  // Fix: on iOS, skip geometry extraction entirely. Snap still works
+  // (returns null gracefully when pageSegments is empty). The ghost
+  // geometry overlay simply won't appear — acceptable trade-off.
+  rswap(
+    /extractPageGeometry\(page,\s*vp\)\.then/g,
+    'if (!isIOS) extractPageGeometry(page, vp).then',
+    'P5 — skip geometry extraction on iOS (biggest RAM saving)'
+  );
+
+  // ── P6: Defer auto-restore until first tap (regex) ───────────
+  // Cold start: PDF parse + render fires immediately on load.
+  // The auto-restore IIFE (at the bottom of the script) calls
+  // loadPdfBytes + pdfjsLib.getDocument simultaneously.
+  // Two large async operations at once = OOM on iOS cold start.
+  //
+  // Uses regex so whitespace variations don't matter.
+  rswap(
+    /if\s*\(\s*bytes\s*\)\s*\{\s*loadSessionFromStore\s*\(\s*latest\.filename\s*\)\s*;\s*\}/,
+    'if (bytes) {\n' +
+    '        if (isIOS) {\n' +
+    '          // defer restore until first tap — avoids cold-start OOM\n' +
+    '          document.addEventListener(\'pointerdown\', function _dr() {\n' +
+    '            document.removeEventListener(\'pointerdown\', _dr);\n' +
+    '            loadSessionFromStore(latest.filename);\n' +
+    '          }, { once: true, passive: true });\n' +
+    '        } else {\n' +
+    '          loadSessionFromStore(latest.filename);\n' +
+    '        }\n' +
+    '      }',
+    'P6 — defer auto-restore until first tap'
+  );
+
+  // ── P7: Free PDF bytes after IDB save ────────────────────────
+  // After pdf.js gets the data, currentPdfBytes is dead weight.
+  // On iOS: free it as soon as the IDB write completes.
+  rswap(
+    /tx\.oncomplete\s*=\s*\(\)\s*=>\s*res\(true\);/,
+    'tx.oncomplete = () => { if (isIOS) { currentPdfBytes = null; } res(true); };',
+    'P7 — free PDF bytes after IDB save'
+  );
+
+  // ── P8: Version badge ────────────────────────────────────────
+  // Visible in bottom-right of the patched app so you always know
+  // which version is running. Also used as the already-patched guard.
   var bodyClose = '</body>';
   var bodyIdx = src.lastIndexOf(bodyClose);
   if (bodyIdx !== -1) {
-    var inject = buildIosBlock();
-    src = src.slice(0, bodyIdx) + inject + '\n' + src.slice(bodyIdx);
-    log('  P5 — iOS memory block + version badge', 'ok'); ok++;
+    var badge =
+      '\n<!-- ios-v12 -->\n' +
+      '<div style="position:fixed;bottom:4px;right:6px;z-index:9999;' +
+      'font-family:monospace;font-size:9px;color:rgba(255,255,255,0.25);' +
+      'pointer-events:none;letter-spacing:0.05em;">ios-v12</div>\n';
+    src = src.slice(0, bodyIdx) + badge + src.slice(bodyIdx);
+    log('  P8 — version badge (ios-v12)', 'ok'); ok++;
   } else {
-    log('  P5 — could not find </body>', 'err'); fail++;
+    log('  P8 — version badge — no </body> found', 'err'); fail++;
   }
 
   return { src: src, ok: ok, fail: fail };
-}
-
-// Returns a complete script tag — no unescaped close tags inside strings.
-function buildIosBlock() {
-  var lines = [
-    '',
-    '<!-- ios-v11: injected by patcher v11 -->',
-    '<div id="ios-ver" style="position:fixed;bottom:6px;right:8px;z-index:9999;',
-    '  font-family:monospace;font-size:10px;color:rgba(255,255,255,0.3);',
-    '  pointer-events:none;">ios-v11</div>',
-    '',
-    '<scr' + 'ipt>',  // split so patcher's own parser doesn't choke
-    '(function () {',
-    '  // Only run on iOS',
-    '  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||',
-    '    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);',
-    '  if (!isIOS) return;',
-    '',
-    '  // ── 1. Wrap loadPDF: clear old geometry before loading ──────',
-    '  var _origLoadPDF = window.loadPDF;',
-    '  if (_origLoadPDF) {',
-    '    window.loadPDF = function (file) {',
-    '      window.pageSegments = [];',
-    '      window.snapGrid = null;',
-    '      return _origLoadPDF(file);',
-    '    };',
-    '  }',
-    '',
-    '  // ── 2. Wrap loadSessionFromStore: clear geometry ─────────────',
-    '  var _origLSFS = window.loadSessionFromStore;',
-    '  if (_origLSFS) {',
-    '    window.loadSessionFromStore = async function (filename) {',
-    '      window.pageSegments = [];',
-    '      window.snapGrid = null;',
-    '      return _origLSFS(filename);',
-    '    };',
-    '  }',
-    '',
-    '  // ── 3. Defer startup auto-restore until first tap ────────────',
-    '  // The auto-restore IIFE at the bottom of the main script calls',
-    '  // loadPdfBytes() immediately on page load. On iOS, doing PDF',
-    '  // parse + canvas render + IDB restore all at once = OOM crash.',
-    '  // Block loadPdfBytes until first pointerdown, then restore.',
-    '  var _origLPB = window.loadPdfBytes;',
-    '  if (_origLPB) {',
-    '    window.loadPdfBytes = async function (filename) {',
-    '      // Return null — auto-restore IIFE will silently bail',
-    '      return null;',
-    '    };',
-    '    document.addEventListener("pointerdown", function _tap() {',
-    '      document.removeEventListener("pointerdown", _tap);',
-    '      // Restore original so subsequent IDB reads work normally',
-    '      window.loadPdfBytes = _origLPB;',
-    '      // Trigger the restore that was blocked',
-    '      if (!window.pdfDoc) {',
-    '        try {',
-    '          var idx = JSON.parse(localStorage.getItem("mpdf-index") || "[]");',
-    '          if (idx.length > 0) window.loadSessionFromStore(idx[0].filename);',
-    '        } catch(e) {}',
-    '      }',
-    '    }, { once: true, passive: true });',
-    '  }',
-    '',
-    '})();',
-    ''
-  ];
-
-  // Join and fix the split script tag back together
-  return lines.join('\n').replace('<scr' + 'ipt>', '<script>');
 }
 </script>
 </body>
