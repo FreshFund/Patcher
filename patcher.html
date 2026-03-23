@@ -60,7 +60,7 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
     <h1>Modern <span>Measure</span></h1>
     <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v10</h1>
   </div>
-  <p class="sub">Fixes: fast-pan, refresh/restore, and second-document crashes. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
+  <p class="sub">Fixes fast-pan, refresh/restore, and second-document crashes. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
 
   <div class="pick-wrap">
     <div class="pick-face">
@@ -122,16 +122,16 @@ inp.addEventListener('change', function () {
     log(Math.round(src.length / 1024) + ' KB loaded.', 'info');
 
     if (src.indexOf('_iosMemFree') !== -1) {
-      log('⚠  Already patched — use the ORIGINAL canvas.html', 'warn');
+      log('Already patched — use the ORIGINAL canvas.html', 'warn');
     }
     if (src.indexOf('const renderScale=2.0;') === -1) {
-      log('⚠  renderScale=2.0 not found — may be wrong file', 'warn');
+      log('renderScale=2.0 not found — may be wrong file', 'warn');
     }
 
     var result = applyAll(src);
     log('');
     log(result.fail === 0
-      ? '✓ All ' + result.ok + ' patches applied!'
+      ? 'All ' + result.ok + ' patches applied!'
       : result.ok + ' applied, ' + result.fail + ' failed',
       result.fail === 0 ? 'ok' : 'err');
     output = result.src;
@@ -156,40 +156,30 @@ dlBtn.addEventListener('click', function () {
   }
 });
 
-// ════════════════════════════════════════════════════════════════
-// PATCHES
-// P1–P4: minimal targeted string swaps (proven anchors)
-// P5:    large block injected before </script> — no risky anchors
-// ════════════════════════════════════════════════════════════════
 function applyAll(src) {
   var ok = 0, fail = 0;
 
   function swap(anchor, replacement, label) {
     var i = src.indexOf(anchor);
-    if (i === -1) { log('✗  ' + label + ' — anchor not found', 'err'); fail++; return false; }
+    if (i === -1) { log('  ' + label + ' — anchor not found', 'err'); fail++; return false; }
     src = src.slice(0, i) + replacement + src.slice(i + anchor.length);
-    log('✓  ' + label, 'ok'); ok++; return true;
+    log('  ' + label, 'ok'); ok++; return true;
   }
 
-  // ── P1: isIOS flag + renderScale 1.0 ─────────────────────────
+  // P1: isIOS + renderScale 1.0
   swap(
     'const renderScale=2.0;',
     'const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||\n' +
     '  (navigator.platform === \'MacIntel\' && navigator.maxTouchPoints > 1);\n' +
     'const renderScale = isIOS ? 1.0 : 2.0;',
-    'P1 — isIOS flag + renderScale 1.0 (4× less canvas RAM)'
+    'P1 — isIOS + renderScale 1.0 (4x less canvas RAM)'
   );
 
-  // ── P2: Debounce SVG rebuild during pan ───────────────────────
-  // applyTransform fires redrawOverlay() on every pointermove at 60 Hz.
-  // Each call clears + rebuilds the entire SVG DOM. On iOS = crash.
-  // Replace the rAF with a 150 ms debounce: zero rebuilds while panning,
-  // one rebuild 150 ms after the finger lifts.
+  // P2: debounce SVG rebuild during pan
   swap(
     '  // Redraw labels in real-time during pinch \u2014 rAF-throttled so we never queue more than one\n' +
     '  cancelAnimationFrame(_rafRedraw);\n' +
     '  _rafRedraw = requestAnimationFrame(()=>{ redrawOverlay(); });',
-    '  // iOS: debounce SVG rebuild — skip during pan, fire once 150ms after lift\n' +
     '  if (isIOS) {\n' +
     '    clearTimeout(_iosRDTimer);\n' +
     '    _iosRDTimer = setTimeout(function () { redrawOverlay(); }, 150);\n' +
@@ -197,18 +187,17 @@ function applyAll(src) {
     '    cancelAnimationFrame(_rafRedraw);\n' +
     '    _rafRedraw = requestAnimationFrame(function () { redrawOverlay(); });\n' +
     '  }',
-    'P2 — debounce SVG rebuild during pan (fixes fast-pan crash)'
+    'P2 — debounce SVG redraw during pan (fast-pan crash)'
   );
 
-  // ── P3: Declare _iosRDTimer ───────────────────────────────────
+  // P3: declare _iosRDTimer
   swap(
     'let _rafRedraw = null',
     'let _rafRedraw = null, _iosRDTimer = null',
     'P3 — declare _iosRDTimer'
   );
 
-  // ── P4: Cache getBoundingClientRect ───────────────────────────
-  // Called on every pointermove — forces layout reflow each time on iOS.
+  // P4: cache getBoundingClientRect
   swap(
     'function screenToCanvas(sx,sy) {\n' +
     '  const r=canvasViewport.getBoundingClientRect();\n' +
@@ -225,115 +214,73 @@ function applyAll(src) {
     '    : canvasViewport.getBoundingClientRect();\n' +
     '  return { x: (sx - r.left - panX) / zoom, y: (sy - r.top - panY) / zoom };\n' +
     '}',
-    'P4 — cache getBoundingClientRect (no layout reflow per touch)'
+    'P4 — cache getBoundingClientRect'
   );
 
-  // ── P5: iOS memory management block ──────────────────────────
-  // Injected before </script>. No tricky mid-function anchors needed.
-  //
-  // Wraps three functions that all suffer from the same problem:
-  // currentPdfBytes (the full PDF ArrayBuffer) is kept alive on the
-  // main thread long after pdf.js has copied it to its worker thread.
-  // On iOS this holds 5–50 MB that can't be reclaimed during render.
-  //
-  // Also: loadPDF and loadSessionFromStore don't clear pageSegments
-  // before starting, so two PDFs worth of geometry sit in RAM simultaneously.
-  //
-  // Strategy: wrap each function so that on iOS it:
-  //   1. Clears pageSegments/snapGrid before starting (frees old geometry)
-  //   2. Nulls currentPdfBytes once pdf.js .promise resolves (frees bytes)
-  //   3. Defers session auto-restore to first tap (spreads cold-start work)
-  //
-  var iosBlock = [
-    '',
-    '// ── iOS memory management (injected by patcher v10) ─────────────',
-    '(function () {',
-    '  if (!isIOS) return;',
-    '',
-    '  // Helper: free bytes once pdf.js has them, and call page.cleanup() after render',
-    '  function _iosMemFree(promise) {',
-    '    return promise.then(function (doc) {',
-    '      setTimeout(function () { currentPdfBytes = null; }, 200);',
-    '      return doc;',
-    '    });',
-    '  }',
-    '',
-    '  // Wrap loadPDF: clear old geometry first, free bytes after pdf.js resolves',
-    '  var _origLoadPDF = loadPDF;',
-    '  loadPDF = function (file) {',
-    '    pageSegments = []; snapGrid = null; // free previous PDF geometry',
-    '    _origLoadPDF(file);',
-    '  };',
-    '',
-    '  // Wrap loadSessionFromStore: same treatment for refresh/restore',
-    '  var _origLoadSession = loadSessionFromStore;',
-    '  loadSessionFromStore = async function (filename) {',
-    '    pageSegments = []; snapGrid = null; // free previous PDF geometry',
-    '    // Call original — it sets currentPdfBytes then hands to pdf.js',
-    '    await _origLoadSession(filename);',
-    '    // Original is done; pdf.js worker has the data — free our copy',
-    '    setTimeout(function () { currentPdfBytes = null; }, 300);',
-    '  };',
-    '',
-    '  // Patch pdfjsLib.getDocument so every call auto-frees currentPdfBytes',
-    '  // after the worker receives the data. This catches loadPDF\'s internal',
-    '  // call too, without needing to modify loadPDF\'s body.',
-    '  var _origGetDoc = pdfjsLib.getDocument.bind(pdfjsLib);',
-    '  pdfjsLib.getDocument = function (src) {',
-    '    var task = _origGetDoc(src);',
-    '    var origPromise = task.promise;',
-    '    task.promise = origPromise.then(function (doc) {',
-    '      setTimeout(function () { currentPdfBytes = null; }, 200);',
-    '      return doc;',
-    '    }, function (err) { return Promise.reject(err); });',
-    '    return task;',
-    '  };',
-    '',
-    '  // Defer the startup auto-restore: run it only on first user tap',
-    '  // to avoid cold-start OOM (PDF parse + render + IDB restore at once)',
-    '  var _origAutoRestore = window._iosAutoRestore;',
-    '  // The auto-restore IIFE runs immediately on load. We intercept',
-    '  // loadSessionFromStore (already wrapped above) so the first call',
-    '  // inside the IIFE goes through our wrapper — but the IIFE itself',
-    '  // has already fired. So also wrap the bytes-reading step:',
-    '  // Override loadPdfBytes to defer its resolution until first tap.',
-    '  var _origLoadPdfBytes = loadPdfBytes;',
-    '  var _deferUntilTap = true;',
-    '  // Allow immediate IDB reads after first tap',
-    '  document.addEventListener(\'pointerdown\', function () {',
-    '    _deferUntilTap = false;',
-    '  }, { once: true, passive: true });',
-    '  loadPdfBytes = async function (filename) {',
-    '    if (_deferUntilTap) {',
-    '      // Return null so the auto-restore IIFE bails out silently.',
-    '      // The session will restore on first tap via loadSessionFromStore.',
-    '      return null;',
-    '    }',
-    '    return _origLoadPdfBytes(filename);',
-    '  };',
-    '',
-    '  // On first tap: trigger the restore that was blocked above',
-    '  document.addEventListener(\'pointerdown\', function () {',
-    '    try {',
-    '      var idx = JSON.parse(localStorage.getItem(\'mpdf-index\') || \'[]\');',
-    '      if (idx.length > 0 && !pdfDoc) {',
-    '        loadSessionFromStore(idx[0].filename);',
-    '      }',
-    '    } catch (e) {}',
-    '  }, { once: true, passive: true });',
-    '',
-    '})();',
-    ''
-  ].join('\n');
-
-  // Inject before the final </script>
-  var scriptClose = '</script>';
-  var lastClose = src.lastIndexOf(scriptClose);
+  // P5: inject iOS memory block before closing script tag
+  // IMPORTANT: use '<\/script>' so the browser does not close THIS script tag
+  // when parsing the patcher page itself.
+  var closeTag = '<\/script>';
+  var lastClose = src.lastIndexOf(closeTag);
   if (lastClose !== -1) {
-    src = src.slice(0, lastClose) + iosBlock + src.slice(lastClose);
-    log('✓  P5 — iOS memory management block injected', 'ok'); ok++;
+    var block = [
+      '',
+      '// iOS memory management — injected by patcher v10',
+      '(function () {',
+      '  if (!isIOS) return;',
+      '',
+      '  // Wrap pdfjsLib.getDocument: free currentPdfBytes once worker has data',
+      '  var _origGetDoc = pdfjsLib.getDocument.bind(pdfjsLib);',
+      '  pdfjsLib.getDocument = function (params) {',
+      '    var task = _origGetDoc(params);',
+      '    task.promise = task.promise.then(function (doc) {',
+      '      setTimeout(function () { currentPdfBytes = null; }, 200);',
+      '      return doc;',
+      '    }, function (e) { return Promise.reject(e); });',
+      '    return task;',
+      '  };',
+      '',
+      '  // Wrap loadPDF: clear old geometry before loading new PDF',
+      '  var _origLoadPDF = loadPDF;',
+      '  loadPDF = function (file) {',
+      '    pageSegments = []; snapGrid = null;',
+      '    _origLoadPDF(file);',
+      '  };',
+      '',
+      '  // Wrap loadSessionFromStore: clear geometry + defer until first tap',
+      '  var _origLoadSession = loadSessionFromStore;',
+      '  loadSessionFromStore = async function (filename) {',
+      '    pageSegments = []; snapGrid = null;',
+      '    return _origLoadSession(filename);',
+      '  };',
+      '',
+      '  // Block the startup auto-restore IIFE from running immediately.',
+      '  // It calls loadPdfBytes — return null so it bails, then restore on first tap.',
+      '  var _origLoadPdfBytes = loadPdfBytes;',
+      '  var _tapReady = false;',
+      '  loadPdfBytes = async function (filename) {',
+      '    if (!_tapReady) return null;',
+      '    return _origLoadPdfBytes(filename);',
+      '  };',
+      '  document.addEventListener(\'pointerdown\', function _firstTap() {',
+      '    document.removeEventListener(\'pointerdown\', _firstTap);',
+      '    _tapReady = true;',
+      '    loadPdfBytes = _origLoadPdfBytes; // restore original',
+      '    if (!pdfDoc) {',
+      '      try {',
+      '        var idx = JSON.parse(localStorage.getItem(\'mpdf-index\') || \'[]\');',
+      '        if (idx.length > 0) loadSessionFromStore(idx[0].filename);',
+      '      } catch(e) {}',
+      '    }',
+      '  }, { once: true, passive: true });',
+      '',
+      '})();',
+      ''
+    ].join('\n');
+    src = src.slice(0, lastClose) + block + src.slice(lastClose);
+    log('  P5 — iOS memory management block', 'ok'); ok++;
   } else {
-    log('✗  P5 — could not find </script>', 'err'); fail++;
+    log('  P5 — could not find closing script tag', 'err'); fail++;
   }
 
   return { src: src, ok: ok, fail: fail };
