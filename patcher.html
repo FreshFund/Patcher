@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MeasurePDF iOS Patcher v12</title>
+<title>MeasurePDF iOS Patcher v13</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -58,9 +58,9 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   </div>
   <div>
     <h1>Modern <span>Measure</span></h1>
-    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v12</h1>
+    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v13</h1>
   </div>
-  <p class="sub">Fixes fast-pan, refresh/restore, and second-document crashes. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
+  <p class="sub">Batched snap extraction + single-path overlay on iOS. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
 
   <div class="pick-wrap">
     <div class="pick-face">
@@ -121,8 +121,8 @@ inp.addEventListener('change', function () {
     var src = reader.result;
     log(Math.round(src.length / 1024) + ' KB loaded.', 'info');
 
-    if (src.indexOf('ios-v12') !== -1) {
-      log('Already patched with v12 — use the ORIGINAL canvas.html', 'warn');
+    if (src.indexOf('ios-v13') !== -1) {
+      log('Already patched with v13 — use the ORIGINAL canvas.html', 'warn');
     }
     if (src.indexOf('const renderScale=2.0;') === -1) {
       log('renderScale=2.0 not found — may be wrong file', 'warn');
@@ -156,10 +156,10 @@ dlBtn.addEventListener('click', function () {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
 function applyAll(src) {
   var ok = 0, fail = 0;
 
-  // Exact string swap
   function swap(anchor, replacement, label) {
     var i = src.indexOf(anchor);
     if (i === -1) { log('  ' + label + ' — anchor not found', 'err'); fail++; return false; }
@@ -167,7 +167,6 @@ function applyAll(src) {
     log('  ' + label, 'ok'); ok++; return true;
   }
 
-  // Regex swap — immune to whitespace variations
   function rswap(re, replacement, label) {
     if (!re.test(src)) { log('  ' + label + ' — not found', 'err'); fail++; return false; }
     src = src.replace(re, replacement);
@@ -184,9 +183,6 @@ function applyAll(src) {
   );
 
   // ── P2: Debounce SVG rebuild during pan ──────────────────────
-  // applyTransform fires redrawOverlay every pointermove at 60 Hz.
-  // redrawOverlay clears and rebuilds the entire SVG DOM from scratch.
-  // On iOS with many annotations = OOM crash during fast pan.
   swap(
     '  // Redraw labels in real-time during pinch \u2014 rAF-throttled so we never queue more than one\n' +
     '  cancelAnimationFrame(_rafRedraw);\n' +
@@ -228,37 +224,136 @@ function applyAll(src) {
     'P4 — cache getBoundingClientRect'
   );
 
-  // ── P5: Skip geometry extraction on iOS ─────────────────────
-  // THE MAIN CRASH CAUSE on restore/second-doc:
+  // ── P5: iOS batched extractor + single-path overlay ──────────
   //
-  // extractPageGeometry() iterates every PDF drawing operator and builds
-  // pageSegments[] — potentially tens of thousands of objects.
-  // drawGeometryOverlay() then creates an individual SVG <line> element
-  // for EACH segment — the DOM alone can be 5-20 MB.
-  // This all happens during restore, while currentPdfBytes + the decoded
-  // PDF canvas are also in memory. Combined they exceed WKWebView's limit.
+  // WHY the original crashed:
+  //   extractPageGeometry() runs synchronously in one giant loop.
+  //   drawGeometryOverlay() creates one SVG <line> per segment —
+  //   10,000 segments = 10,000 DOM nodes = ~15 MB of DOM overhead.
+  //   Combined with currentPdfBytes + canvas during restore = OOM.
   //
-  // Fix: on iOS, skip geometry extraction entirely. Snap still works
-  // (returns null gracefully when pageSegments is empty). The ghost
-  // geometry overlay simply won't appear — acceptable trade-off.
+  // The fix has two parts:
+  //   A) Batched extractor: yields to the browser every 30 operators
+  //      via setTimeout(0), so the main thread never blocks long enough
+  //      to trigger WKWebView's memory pressure kill.
+  //   B) Single-path overlay: all segments concatenated into one
+  //      SVG <path> d= string — 1 DOM node instead of 10,000.
+  //      Same visual result, ~100x less DOM memory.
+  //
+  // Injected after the closing brace of extractPageGeometry (reliable anchor).
+  var afterExtractor = '  } catch(e) {\n  }\n\n}\n';
+  var batchedCode =
+    '\n// ── iOS: batched extractor + single-path overlay (ios-v13) ──\n' +
+    'async function extractPageGeometryIOS(page, viewport) {\n' +
+    '  pageSegments = []; snapGrid = null;\n' +
+    '  var vt = viewport.transform;\n' +
+    '  function cc(c, m) {\n' +
+    '    return [c[0]*m[0]+c[2]*m[1], c[1]*m[0]+c[3]*m[1],\n' +
+    '            c[0]*m[2]+c[2]*m[3], c[1]*m[2]+c[3]*m[3],\n' +
+    '            c[0]*m[4]+c[2]*m[5]+c[4], c[1]*m[4]+c[3]*m[5]+c[5]];\n' +
+    '  }\n' +
+    '  function makeH(ctm) {\n' +
+    '    function pc(px, py) {\n' +
+    '      var x = ctm[0]*px + ctm[2]*py + ctm[4];\n' +
+    '      var y = ctm[1]*px + ctm[3]*py + ctm[5];\n' +
+    '      return { x: vt[0]*x + vt[2]*y + vt[4], y: vt[1]*x + vt[3]*y + vt[5] };\n' +
+    '    }\n' +
+    '    function ps(ax, ay, bx, by) {\n' +
+    '      var p1 = pc(ax, ay), p2 = pc(bx, by);\n' +
+    '      if (Math.hypot(p2.x-p1.x, p2.y-p1.y) >= 2)\n' +
+    '        pageSegments.push({ x1:p1.x, y1:p1.y, x2:p2.x, y2:p2.y, isCurve:false });\n' +
+    '    }\n' +
+    '    return { pdfToCanvas: pc, pushSeg: ps };\n' +
+    '  }\n' +
+    '  function yn() { return new Promise(function(r) { setTimeout(r, 0); }); }\n' +
+    '  try {\n' +
+    '    var ops = await page.getOperatorList();\n' +
+    '    var fn = ops.fnArray, ar = ops.argsArray;\n' +
+    '    var ctm = [1,0,0,1,0,0], st = [[1,0,0,1,0,0]];\n' +
+    '    for (var i = 0; i < fn.length; i++) {\n' +
+    '      if (i % 30 === 0) await yn(); // yield every 30 ops\n' +
+    '      var f = fn[i], a = ar[i];\n' +
+    '      if (f === _OPC.save) { st.push(ctm.slice()); }\n' +
+    '      else if (f === _OPC.restore) { if (st.length > 1) ctm = st.pop(); }\n' +
+    '      else if (f === _OPC.transform) { ctm = cc(ctm, a); }\n' +
+    '      else if (f === _OPC.paintFormXObjectBegin) {\n' +
+    '        st.push(ctm.slice());\n' +
+    '        if (a && Array.isArray(a[1]) && a[1].length === 6) ctm = cc(ctm, a[1]);\n' +
+    '      }\n' +
+    '      else if (f === _OPC.paintFormXObjectEnd) { if (st.length > 1) ctm = st.pop(); }\n' +
+    '      else if (f === _OPC.constructPath) {\n' +
+    '        var h = makeH(ctm);\n' +
+    '        decodeConstructPath(a[0], a[1], h.pdfToCanvas, h.pushSeg);\n' +
+    '      }\n' +
+    '    }\n' +
+    '    await yn();\n' +
+    '    // Deduplicate\n' +
+    '    var seen = new Set(), dd = [];\n' +
+    '    for (var j = 0; j < pageSegments.length; j++) {\n' +
+    '      if (j % 500 === 0) await yn();\n' +
+    '      var s = pageSegments[j];\n' +
+    '      var k = Math.round(s.x1)+\',\'+Math.round(s.y1)+\',\'+Math.round(s.x2)+\',\'+Math.round(s.y2);\n' +
+    '      var rev = Math.round(s.x2)+\',\'+Math.round(s.y2)+\',\'+Math.round(s.x1)+\',\'+Math.round(s.y1);\n' +
+    '      if (!seen.has(k) && !seen.has(rev)) { seen.add(k); dd.push(s); }\n' +
+    '    }\n' +
+    '    pageSegments = dd;\n' +
+    '    snapGrid = buildSnapGrid(pageSegments);\n' +
+    '    await yn();\n' +
+    '  } catch(e) { console.warn(\'[iOS snap]\', e); }\n' +
+    '}\n' +
+    '\n' +
+    'function drawGeometryOverlayIOS() {\n' +
+    '  // Remove any old overlay\n' +
+    '  var old = document.getElementById(\'_iosGeoPath\');\n' +
+    '  if (old) old.remove();\n' +
+    '  if (!pageSegments || pageSegments.length === 0) return;\n' +
+    '  // Build one <path> d= string — 1 DOM node for all segments\n' +
+    '  var d = \'\';\n' +
+    '  for (var i = 0; i < pageSegments.length; i++) {\n' +
+    '    var s = pageSegments[i];\n' +
+    '    d += \'M\' + s.x1.toFixed(1) + \',\' + s.y1.toFixed(1) +\n' +
+    '         \'L\' + s.x2.toFixed(1) + \',\' + s.y2.toFixed(1);\n' +
+    '  }\n' +
+    '  var ns = \'http://www.w3.org/2000/svg\';\n' +
+    '  var path = document.createElementNS(ns, \'path\');\n' +
+    '  path.id = \'_iosGeoPath\';\n' +
+    '  path.setAttribute(\'d\', d);\n' +
+    '  path.setAttribute(\'stroke\', \'rgba(39,174,96,0.2)\');\n' +
+    '  path.setAttribute(\'stroke-width\', \'0.8\');\n' +
+    '  path.setAttribute(\'fill\', \'none\');\n' +
+    '  path.setAttribute(\'pointer-events\', \'none\');\n' +
+    '  svgOverlay.insertBefore(path, svgOverlay.firstChild);\n' +
+    '}\n';
+
+  if (!swap(afterExtractor, afterExtractor + batchedCode, 'P5 — batched extractor + single-path overlay')) {
+    // already reported as failed
+  }
+
+  // ── P6: Use iOS extractor in renderPage ──────────────────────
+  // Replace the extractPageGeometry call inside renderPage with a
+  // branch: iOS uses the batched version + single-path overlay,
+  // desktop uses the original.
   rswap(
-    /extractPageGeometry\(page,\s*vp\)\.then/g,
-    'if (!isIOS) extractPageGeometry(page, vp).then',
-    'P5 — skip geometry extraction on iOS (biggest RAM saving)'
+    /extractPageGeometry\(page,\s*vp\)\.then\(\s*\(\)\s*=>\s*\{[\s\S]*?if\s*\(snapEnabled\)\s*drawGeometryOverlay\(\);\s*\}\s*\}\s*\);/,
+    'if (isIOS) {\n' +
+    '        extractPageGeometryIOS(page, vp).then(function () {\n' +
+    '          if (pageSegments.length > 0 && snapEnabled) drawGeometryOverlayIOS();\n' +
+    '        });\n' +
+    '      } else {\n' +
+    '        extractPageGeometry(page, vp).then(() => {\n' +
+    '              if (pageSegments.length > 0) {\n' +
+    '          if (snapEnabled) drawGeometryOverlay();\n' +
+    '        }\n' +
+    '        });\n' +
+    '      }',
+    'P6 — route iOS to batched extractor in renderPage'
   );
 
-  // ── P6: Defer auto-restore until first tap (regex) ───────────
-  // Cold start: PDF parse + render fires immediately on load.
-  // The auto-restore IIFE (at the bottom of the script) calls
-  // loadPdfBytes + pdfjsLib.getDocument simultaneously.
-  // Two large async operations at once = OOM on iOS cold start.
-  //
-  // Uses regex so whitespace variations don't matter.
+  // ── P7: Defer auto-restore until first tap (regex) ───────────
   rswap(
     /if\s*\(\s*bytes\s*\)\s*\{\s*loadSessionFromStore\s*\(\s*latest\.filename\s*\)\s*;\s*\}/,
     'if (bytes) {\n' +
     '        if (isIOS) {\n' +
-    '          // defer restore until first tap — avoids cold-start OOM\n' +
     '          document.addEventListener(\'pointerdown\', function _dr() {\n' +
     '            document.removeEventListener(\'pointerdown\', _dr);\n' +
     '            loadSessionFromStore(latest.filename);\n' +
@@ -267,33 +362,28 @@ function applyAll(src) {
     '          loadSessionFromStore(latest.filename);\n' +
     '        }\n' +
     '      }',
-    'P6 — defer auto-restore until first tap'
+    'P7 — defer auto-restore until first tap'
   );
 
-  // ── P7: Free PDF bytes after IDB save ────────────────────────
-  // After pdf.js gets the data, currentPdfBytes is dead weight.
-  // On iOS: free it as soon as the IDB write completes.
+  // ── P8: Free PDF bytes after IDB save (regex) ────────────────
   rswap(
     /tx\.oncomplete\s*=\s*\(\)\s*=>\s*res\(true\);/,
     'tx.oncomplete = () => { if (isIOS) { currentPdfBytes = null; } res(true); };',
-    'P7 — free PDF bytes after IDB save'
+    'P8 — free PDF bytes after IDB save'
   );
 
-  // ── P8: Version badge ────────────────────────────────────────
-  // Visible in bottom-right of the patched app so you always know
-  // which version is running. Also used as the already-patched guard.
-  var bodyClose = '</body>';
-  var bodyIdx = src.lastIndexOf(bodyClose);
+  // ── P9: Version badge ────────────────────────────────────────
+  var bodyIdx = src.lastIndexOf('</body>');
   if (bodyIdx !== -1) {
-    var badge =
-      '\n<!-- ios-v12 -->\n' +
+    src = src.slice(0, bodyIdx) +
+      '\n<!-- ios-v13 -->\n' +
       '<div style="position:fixed;bottom:4px;right:6px;z-index:9999;' +
       'font-family:monospace;font-size:9px;color:rgba(255,255,255,0.25);' +
-      'pointer-events:none;letter-spacing:0.05em;">ios-v12</div>\n';
-    src = src.slice(0, bodyIdx) + badge + src.slice(bodyIdx);
-    log('  P8 — version badge (ios-v12)', 'ok'); ok++;
+      'pointer-events:none;letter-spacing:0.05em;">ios-v13</div>\n' +
+      src.slice(bodyIdx);
+    log('  P9 — version badge (ios-v13)', 'ok'); ok++;
   } else {
-    log('  P8 — version badge — no </body> found', 'err'); fail++;
+    log('  P9 — no </body> found', 'err'); fail++;
   }
 
   return { src: src, ok: ok, fail: fail };
