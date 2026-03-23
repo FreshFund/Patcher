@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MeasurePDF iOS Patcher v15</title>
+<title>MeasurePDF iOS Patcher v16</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -56,10 +56,9 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   </div>
   <div>
     <h1>Modern <span>Measure</span></h1>
-    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v15</h1>
+    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v16</h1>
   </div>
-  <p class="sub">Zero SVG rebuilds during pan. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
-
+  <p class="sub">No IDB session on iOS, touch-gated pan, crash logger. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
   <div class="pick-wrap">
     <div class="pick-face">
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -69,16 +68,13 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
     </div>
     <input type="file" id="file-input" accept=".html,text/html">
   </div>
-
   <div class="log" id="log"></div>
-
   <button id="dl-btn">
     <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
       <path d="M3 13v4h14v-4M10 3v10M6 7l4-4 4 4"/>
     </svg>
     Save canvas_ios.html
   </button>
-
   <div class="steps" id="steps">
     <div style="color:#f0ede8;font-weight:600;margin-bottom:4px;">To save on iPhone:</div>
     <div>1. Tap <b style="color:#f0ede8">Save canvas_ios.html</b> above</div>
@@ -117,8 +113,8 @@ inp.addEventListener('change', function () {
   reader.onload = function () {
     var src = reader.result;
     log(Math.round(src.length / 1024) + ' KB loaded.', 'info');
-    if (src.indexOf('ios-v15') !== -1)
-      log('Already patched with v15 — use the ORIGINAL canvas.html', 'warn');
+    if (src.indexOf('ios-v16') !== -1)
+      log('Already patched with v16 — use the ORIGINAL canvas.html', 'warn');
     if (src.indexOf('const renderScale=2.0;') === -1)
       log('renderScale=2.0 not found — may be wrong file', 'warn');
     var result = applyAll(src);
@@ -149,6 +145,304 @@ dlBtn.addEventListener('click', function () {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────
+// THE INJECTED BLOCK
+// Placed before </body> as a plain string.
+// ─────────────────────────────────────────────────────────────────
+
+var INJECT = [
+'',
+'<!-- ios-v16 : injected by patcher v16 -->',
+'',
+'<!-- On-screen crash log visible on iPhone (no console needed) -->',
+'<div id="_iosLog" style="display:none;position:fixed;inset:0;z-index:99999;',
+'  background:rgba(0,0,0,0.93);color:#0f0;font-family:monospace;font-size:11px;',
+'  padding:12px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;">',
+'<div style="color:#ff0;font-size:13px;font-weight:bold;margin-bottom:8px;">',
+'  CRASH LOG ios-v16  (tap to dismiss)</div></div>',
+'',
+'<!-- Version badge -->',
+'<div style="position:fixed;bottom:4px;right:6px;z-index:9999;',
+'  font-family:monospace;font-size:9px;color:rgba(255,255,255,0.3);',
+'  pointer-events:none;letter-spacing:0.05em;">ios-v16</div>',
+'',
+'<script id="_iosPatch">',
+'(function(){',
+'',
+'// ── 0. CRASH LOGGER ─────────────────────────────────────────────',
+'// Catches JS errors, unhandled promise rejections, and manual logs.',
+'// Stores up to 80 entries in localStorage so they survive a crash.',
+'// Tap the red overlay to dismiss. Long-press version badge to open.',
+'var _LL = (function(){',
+'  var KEY = "ios_crash_log";',
+'  var lines = [];',
+'  try { lines = JSON.parse(localStorage.getItem(KEY)||"[]"); } catch(e){}',
+'  function save(){ try{ localStorage.setItem(KEY, JSON.stringify(lines.slice(-80))); }catch(e){} }',
+'  function add(tag, msg){',
+'    var entry = new Date().toISOString().slice(11,23)+" ["+tag+"] "+msg;',
+'    lines.push(entry); save();',
+'    var el = document.getElementById("_iosLog");',
+'    if(el){ el.style.display="block"; el.textContent = lines.slice(-80).join("\\n"); }',
+'  }',
+'  // Show log panel on load if it has content',
+'  window.addEventListener("load", function(){',
+'    if(lines.length > 0){',
+'      var el = document.getElementById("_iosLog");',
+'      if(el){ el.style.display="block"; el.textContent = lines.slice(-80).join("\\n"); }',
+'    }',
+'  }, {once:true});',
+'  return { add:add, clear:function(){ lines=[]; save(); } };',
+'})();',
+'',
+'// Dismiss log on tap',
+'document.addEventListener("click", function(e){',
+'  var el = document.getElementById("_iosLog");',
+'  if(el && el.style.display !== "none" && el.contains(e.target)){',
+'    el.style.display = "none"; _LL.clear();',
+'  }',
+'});',
+'',
+'// Global error handler',
+'window.onerror = function(msg, src, line, col, err){',
+'  _LL.add("ERR", msg+" ("+src+":"+line+":"+col+")");',
+'  if(err && err.stack) _LL.add("STK", err.stack.slice(0,300));',
+'  return false;',
+'};',
+'window.addEventListener("unhandledrejection", function(e){',
+'  var r = e.reason;',
+'  _LL.add("REJ", r ? (r.message||String(r)) : "unhandled rejection");',
+'  if(r && r.stack) _LL.add("STK", r.stack.slice(0,300));',
+'});',
+'',
+'// Memory pressure events (Chrome/Android, not Safari — but log if fired)',
+'if(window.performance && performance.memory){',
+'  setInterval(function(){',
+'    var m = performance.memory;',
+'    _LL.add("MEM", "used="+Math.round(m.usedJSHeapSize/1048576)+"MB',
+'      limit="+Math.round(m.jsHeapSizeLimit/1048576)+"MB");',
+'  }, 10000);',
+'}',
+'',
+'// Log key lifecycle events',
+'_LL.add("BOOT", "ios-v16 patch loaded, isIOS="+isIOS+", ua="+navigator.userAgent.slice(0,80));',
+'document.addEventListener("visibilitychange", function(){',
+'  _LL.add("VIS", document.visibilityState);',
+'});',
+'window.addEventListener("pagehide", function(e){ _LL.add("HIDE", "persisted="+e.persisted); });',
+'window.addEventListener("pageshow", function(e){ _LL.add("SHOW", "persisted="+e.persisted); });',
+'',
+'if(!isIOS){ _LL.add("INFO","not iOS — patches skipped"); return; }',
+'',
+'// ── 1. NO IDB SESSION ON iOS ────────────────────────────────────',
+'// IDB restore is the #1 crash source on iOS:',
+'// - Loads full PDF bytes back into main thread RAM',
+'// - Triggers PDF re-parse + re-render + geometry extraction',
+'//   all while bytes are still alive = OOM',
+'// Fix: on iOS, skip ALL IDB save and restore.',
+'// Measurements/annotations still save to localStorage (fast, small).',
+'// PDF must be re-opened manually — acceptable trade for stability.',
+'var _noop = function(){ return Promise.resolve(null); };',
+'var _noopSave = function(){ return Promise.resolve(true); };',
+'// Intercept IDB functions before the auto-restore IIFE runs',
+'if(typeof loadPdfBytes   !== "undefined") { window._origLPB = loadPdfBytes;   loadPdfBytes   = _noop; }',
+'if(typeof savePdfBytes   !== "undefined") { window._origSPB = savePdfBytes;   savePdfBytes   = _noopSave; }',
+'if(typeof deletePdfBytes !== "undefined") { window._origDPB = deletePdfBytes; deletePdfBytes = _noop; }',
+'if(typeof loadSessionFromStore !== "undefined") {',
+'  window._origLSFS = loadSessionFromStore;',
+'  loadSessionFromStore = async function(filename){',
+'    _LL.add("SESS","loadSessionFromStore blocked on iOS — skipping IDB");',
+'    return;',
+'  };',
+'}',
+'_LL.add("IDB","IDB PDF storage disabled on iOS");',
+'',
+'// ── 2. TOUCH-GATED SVG REBUILD ───────────────────────────────────',
+'// redrawOverlay clears + rebuilds the entire SVG DOM on every call.',
+'// applyTransform calls it on every pointermove = 60x/sec during pan.',
+'// Fix: make redrawOverlay a no-op while any finger is touching.',
+'// touchstart/touchend are ground-truth for physical finger contact.',
+'var _iosTouching = false;',
+'var _iosDirty = false;',
+'',
+'document.addEventListener("touchstart", function(){',
+'  _iosTouching = true;',
+'}, {passive:true, capture:true});',
+'',
+'function _iosAfterTouch(){',
+'  _iosTouching = false;',
+'  if(_iosDirty){',
+'    _iosDirty = false;',
+'    setTimeout(function(){ if(!_iosTouching) try{ redrawOverlay(); }catch(e){ _LL.add("RO",e.message); } }, 50);',
+'  }',
+'}',
+'document.addEventListener("touchend",    _iosAfterTouch, {passive:true, capture:true});',
+'document.addEventListener("touchcancel", _iosAfterTouch, {passive:true, capture:true});',
+'',
+'// Wrap redrawOverlay: no-op during touch, queue for after',
+'var _origRedraw = window.redrawOverlay;',
+'window.redrawOverlay = function(){',
+'  if(_iosTouching){ _iosDirty = true; return; }',
+'  try{ _origRedraw(); } catch(e){ _LL.add("RO",e.message||e); }',
+'};',
+'_LL.add("PAN","touch-gated redrawOverlay installed");',
+'',
+'// ── 3. INTERCEPT applyTransform TO NOT CALL REDRAW ───────────────',
+'// applyTransform ends with a rAF that calls redrawOverlay.',
+'// Even with the wrapper above, the rAF queue can build up.',
+'// Wrap applyTransform to cancel the rAF and use dirty flag instead.',
+'var _origApply = window.applyTransform;',
+'if(_origApply){',
+'  window.applyTransform = function(){',
+'    try{ _origApply(); } catch(e){ _LL.add("AT",e.message||e); }',
+'    // cancel any queued rAF redraws — dirty flag handles it',
+'    if(window._rafRedraw){ cancelAnimationFrame(window._rafRedraw); window._rafRedraw=null; }',
+'    if(_iosTouching) _iosDirty = true;',
+'  };',
+'  _LL.add("AT","applyTransform wrapped");',
+'}',
+'',
+'// ── 4. CACHE getBoundingClientRect ───────────────────────────────',
+'var _vpCache = null;',
+'window.addEventListener("resize",            function(){ _vpCache=null; }, {passive:true});',
+'window.addEventListener("orientationchange", function(){ _vpCache=null; }, {passive:true});',
+'var _origSTC = window.screenToCanvas;',
+'if(_origSTC){',
+'  var _cvp = document.getElementById("canvas-viewport");',
+'  window.screenToCanvas = function(sx, sy){',
+'    var r = _vpCache || (_vpCache = (_cvp||document.getElementById("canvas-viewport")).getBoundingClientRect());',
+'    return { x:(sx-r.left-panX)/zoom, y:(sy-r.top-panY)/zoom };',
+'  };',
+'  _LL.add("BCR","getBoundingClientRect cache installed");',
+'}',
+'',
+'// ── 5. WRAP loadPDF: clear geometry + log ────────────────────────',
+'var _origLoadPDF = window.loadPDF;',
+'if(_origLoadPDF){',
+'  window.loadPDF = function(file){',
+'    _LL.add("PDF","loadPDF: "+file.name+" ("+Math.round(file.size/1024)+"KB)");',
+'    window.pageSegments = []; window.snapGrid = null;',
+'    try{ return _origLoadPDF(file); } catch(e){ _LL.add("PDF_ERR",e.message||e); }',
+'  };',
+'}',
+'',
+'// ── 6. BATCHED GEOMETRY EXTRACTOR ────────────────────────────────',
+'// Snap preserved. Yields every 30 operators so WKWebView stays alive.',
+'// Geometry overlay = ONE sibling <path> node, not thousands of <line>.',
+'async function _iosExtract(page, viewport){',
+'  _LL.add("GEO","start extract, page operators TBD");',
+'  var geo = document.getElementById("_iosGeoSvg");',
+'  if(geo) geo.innerHTML = "";',
+'  window.pageSegments = []; window.snapGrid = null;',
+'  var vt = viewport.transform;',
+'  function cc(c,m){return[c[0]*m[0]+c[2]*m[1],c[1]*m[0]+c[3]*m[1],c[0]*m[2]+c[2]*m[3],c[1]*m[2]+c[3]*m[3],c[0]*m[4]+c[2]*m[5]+c[4],c[1]*m[4]+c[3]*m[5]+c[5]];}',
+'  function mh(ctm){',
+'    function pc(px,py){var x=ctm[0]*px+ctm[2]*py+ctm[4],y=ctm[1]*px+ctm[3]*py+ctm[5];return{x:vt[0]*x+vt[2]*y+vt[4],y:vt[1]*x+vt[3]*y+vt[5]};}',
+'    function ps(ax,ay,bx,by){var p1=pc(ax,ay),p2=pc(bx,by);if(Math.hypot(p2.x-p1.x,p2.y-p1.y)>=2)pageSegments.push({x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,isCurve:false});}',
+'    return{pdfToCanvas:pc,pushSeg:ps};',
+'  }',
+'  function yn(){return new Promise(function(r){setTimeout(r,0);});}',
+'  try{',
+'    var ops=await page.getOperatorList();',
+'    var fn=ops.fnArray,ar=ops.argsArray;',
+'    _LL.add("GEO",fn.length+" operators");',
+'    var ctm=[1,0,0,1,0,0],st=[[1,0,0,1,0,0]];',
+'    for(var i=0;i<fn.length;i++){',
+'      if(i%30===0)await yn();',
+'      var f=fn[i],a=ar[i];',
+'      if(f===_OPC.save)st.push(ctm.slice());',
+'      else if(f===_OPC.restore){if(st.length>1)ctm=st.pop();}',
+'      else if(f===_OPC.transform)ctm=cc(ctm,a);',
+'      else if(f===_OPC.paintFormXObjectBegin){st.push(ctm.slice());if(a&&Array.isArray(a[1])&&a[1].length===6)ctm=cc(ctm,a[1]);}',
+'      else if(f===_OPC.paintFormXObjectEnd){if(st.length>1)ctm=st.pop();}',
+'      else if(f===_OPC.constructPath){var h=mh(ctm);decodeConstructPath(a[0],a[1],h.pdfToCanvas,h.pushSeg);}',
+'    }',
+'    await yn();',
+'    var seen=new Set(),dd=[];',
+'    for(var j=0;j<pageSegments.length;j++){',
+'      if(j%500===0)await yn();',
+'      var s=pageSegments[j];',
+'      var k=Math.round(s.x1)+","+Math.round(s.y1)+","+Math.round(s.x2)+","+Math.round(s.y2);',
+'      var rv=Math.round(s.x2)+","+Math.round(s.y2)+","+Math.round(s.x1)+","+Math.round(s.y1);',
+'      if(!seen.has(k)&&!seen.has(rv)){seen.add(k);dd.push(s);}',
+'    }',
+'    pageSegments=dd; snapGrid=buildSnapGrid(pageSegments);',
+'    _LL.add("GEO","done: "+pageSegments.length+" segs, "+Object.keys(snapGrid.cells).length+" cells");',
+'    await yn();',
+'  } catch(e){ _LL.add("GEO_ERR",e.message||e); }',
+'}',
+'',
+'function _iosDrawOverlay(){',
+'  var ns="http://www.w3.org/2000/svg";',
+'  var geo=document.getElementById("_iosGeoSvg");',
+'  if(!geo){',
+'    geo=document.createElementNS(ns,"svg");',
+'    geo.id="_iosGeoSvg";',
+'    geo.setAttribute("pointer-events","none");',
+'    geo.style.cssText="position:absolute;top:0;left:0;overflow:visible;";',
+'    var sv=document.getElementById("svg-overlay");',
+'    if(sv) sv.parentNode.insertBefore(geo,sv);',
+'  }',
+'  var sv2=document.getElementById("svg-overlay");',
+'  if(sv2){ geo.setAttribute("width",sv2.getAttribute("width")); geo.setAttribute("height",sv2.getAttribute("height")); }',
+'  geo.innerHTML="";',
+'  if(!pageSegments||!pageSegments.length)return;',
+'  var d="";',
+'  for(var i=0;i<pageSegments.length;i++){',
+'    var s=pageSegments[i];',
+'    d+="M"+s.x1.toFixed(1)+","+s.y1.toFixed(1)+"L"+s.x2.toFixed(1)+","+s.y2.toFixed(1);',
+'  }',
+'  var path=document.createElementNS(ns,"path");',
+'  path.setAttribute("d",d);',
+'  path.setAttribute("stroke","rgba(39,174,96,0.2)");',
+'  path.setAttribute("stroke-width","0.8");',
+'  path.setAttribute("fill","none");',
+'  geo.appendChild(path);',
+'  _LL.add("GEO","overlay drawn: "+pageSegments.length+" segs → 1 path node");',
+'}',
+'',
+'// Hook into renderPage via pdfjsLib — intercept after page.render resolves',
+'// by wrapping the drawGeometryOverlay/extractPageGeometry calls.',
+'// We do this by replacing the functions on window after page load.',
+'window._iosExtract = _iosExtract;',
+'window._iosDrawOverlay = _iosDrawOverlay;',
+'',
+'// Override extractPageGeometry and drawGeometryOverlay with iOS versions',
+'window.extractPageGeometry = async function(page, viewport){',
+'  return _iosExtract(page, viewport);',
+'};',
+'window.drawGeometryOverlay = function(){',
+'  _iosDrawOverlay();',
+'};',
+'_LL.add("SNAP","iOS geometry extractor installed");',
+'',
+'// ── 7. WRAP autoSave: skip IDB, only keep localStorage ───────────',
+'var _origAutoSave = window.autoSave;',
+'if(_origAutoSave){',
+'  window.autoSave = function(){',
+'    // saveSession writes to localStorage (measurements/annotations) — keep that',
+'    // savePdfBytes is already a no-op on iOS — safe to call',
+'    if(typeof saveSession === "function") try{ saveSession(); }catch(e){ _LL.add("SAVE",e.message); }',
+'  };',
+'  _LL.add("SAVE","autoSave: IDB bypassed, localStorage only");',
+'}',
+'',
+'// ── 8. VISIBILITY RESTORE ────────────────────────────────────────',
+'// When app comes back from background on iOS, canvas may be cleared.',
+'// Re-render the current page (no IDB involved — just redraws canvas).',',
+'document.addEventListener("visibilitychange", function(){',
+'  if(document.visibilityState==="visible" && window.pdfDoc){',
+'    _LL.add("VIS","re-render on visibility restore");',
+'    try{ renderPage(currentPage); }catch(e){ _LL.add("VIS_ERR",e.message); }',
+'  }',
+'});',
+'',
+'_LL.add("READY","all ios-v16 patches active");',
+'',
+'})();',
+'<\/script>',
+'',
+].join('\n');
+
 function applyAll(src) {
   var ok = 0, fail = 0;
 
@@ -173,75 +467,16 @@ function applyAll(src) {
     'P1 — isIOS + renderScale 1.0'
   );
 
-  // ── P2: Touch-gated SVG rebuild ──────────────────────────────
-  //
-  // Root problem: applyTransform() → redrawOverlay() on every
-  // pointermove. redrawOverlay() clears svgOverlay.innerHTML and
-  // rebuilds every annotation/measurement element from scratch.
-  // At 60 Hz with many elements this is the OOM crash path.
-  //
-  // Why timers/debounces fail: they fire based on elapsed time,
-  // not on whether fingers are actually still touching. A sustained
-  // aggressive pan keeps resetting the timer but it still fires
-  // periodically, still causing rebuilds.
-  //
-  // The correct fix: use touchstart/touchend — the actual browser
-  // events that track physical finger contact — to gate redraws.
-  // _iosTouching is set on touchstart, cleared on touchend.
-  // applyTransform sets a dirty flag but NEVER calls redrawOverlay.
-  // touchend fires the one pending redraw, 50ms after lift.
-  //
-  // Result: exactly ZERO SVG rebuilds during any pan gesture,
-  // regardless of duration or speed.
-  swap(
-    '  // Redraw labels in real-time during pinch \u2014 rAF-throttled so we never queue more than one\n' +
-    '  cancelAnimationFrame(_rafRedraw);\n' +
-    '  _rafRedraw = requestAnimationFrame(()=>{ redrawOverlay(); });',
-    '  // iOS: gate SVG rebuild on touch state — zero rebuilds during pan\n' +
-    '  if (isIOS) {\n' +
-    '    _iosRedrawDirty = true; // mark dirty but never rebuild while touching\n' +
-    '  } else {\n' +
-    '    cancelAnimationFrame(_rafRedraw);\n' +
-    '    _rafRedraw = requestAnimationFrame(function () { redrawOverlay(); });\n' +
-    '  }',
-    'P2 — mark dirty during pan, never rebuild while touching'
-  );
-
-  // ── P3: Declare iOS pan variables + wire touch events ────────
-  //
-  // _iosTouching: true while any finger is on screen (touchstart/touchend)
-  // _iosRedrawDirty: set by applyTransform, consumed by touchend
-  //
-  // touchstart/touchend are the ground truth for finger contact.
-  // Using these (not pointermove/pointerup which can be synthetic)
-  // guarantees we never rebuild the SVG while physically touching.
-  //
-  // touchend: 50ms delay lets the last frame settle before redraw.
-  // touchcancel: treat same as touchend (e.g. incoming call).
-  //
-  // Anchor: proven to match in all versions.
+  // ── P2: Declare _rafRedraw (already exists, add nothing) ─────
+  // Just ensure it exists alongside our later overrides
   swap(
     'let _rafRedraw = null',
-    'let _rafRedraw = null;\n' +
-    'var _iosTouching = false, _iosRedrawDirty = false;\n' +
-    'if (isIOS) {\n' +
-    '  document.addEventListener(\'touchstart\', function () {\n' +
-    '    _iosTouching = true;\n' +
-    '  }, { passive: true, capture: true });\n' +
-    '  function _iosTouchEnd() {\n' +
-    '    _iosTouching = false;\n' +
-    '    if (_iosRedrawDirty) {\n' +
-    '      _iosRedrawDirty = false;\n' +
-    '      setTimeout(function () { if (!_iosTouching) redrawOverlay(); }, 50);\n' +
-    '    }\n' +
-    '  }\n' +
-    '  document.addEventListener(\'touchend\',    _iosTouchEnd, { passive: true, capture: true });\n' +
-    '  document.addEventListener(\'touchcancel\', _iosTouchEnd, { passive: true, capture: true });\n' +
-    '}',
-    'P3 — touch tracking vars + touchend-driven redraw'
+    'let _rafRedraw = null',
+    'P2 — _rafRedraw confirmed'
   );
 
-  // ── P4: Cache getBoundingClientRect ─────────────────────────
+  // ── P3: Cache getBoundingClientRect in original ──────────────
+  // Belt-and-suspenders alongside the runtime wrap in the injected block
   swap(
     'function screenToCanvas(sx,sy) {\n' +
     '  const r=canvasViewport.getBoundingClientRect();\n' +
@@ -258,156 +493,37 @@ function applyAll(src) {
     '    : canvasViewport.getBoundingClientRect();\n' +
     '  return { x: (sx - r.left - panX) / zoom, y: (sy - r.top - panY) / zoom };\n' +
     '}',
-    'P4 — cache getBoundingClientRect'
+    'P3 — cache getBoundingClientRect in source'
   );
 
-  // ── P5: Batched extractor + sibling-SVG overlay ──────────────
-  //
-  // A) Batched: yields via setTimeout(0) every 30 ops — browser
-  //    can breathe, WKWebView doesn't kill for blocking main thread.
-  //
-  // B) Sibling SVG: geometry goes in <svg id="_iosGeoSvg"> which
-  //    is a SIBLING to svgOverlay. redrawOverlay() clears
-  //    svgOverlay.innerHTML — the sibling is untouched.
-  //    v13 put it inside svgOverlay so every redraw destroyed and
-  //    recreated the entire geometry path. Fixed here.
-  //
-  // C) Single <path>: all segments in one d= string.
-  //    1 DOM node instead of 10,000 individual <line> elements.
-  var afterExtractor = '  } catch(e) {\n  }\n\n}\n';
-  var batchedCode =
-    '\n// ── iOS batched extractor + sibling-SVG overlay (ios-v15) ──\n' +
-    'async function extractPageGeometryIOS(page, viewport) {\n' +
-    '  var geo = document.getElementById(\'_iosGeoSvg\');\n' +
-    '  if (geo) geo.innerHTML = \'\';\n' +
-    '  pageSegments = []; snapGrid = null;\n' +
-    '  var vt = viewport.transform;\n' +
-    '  function cc(c,m){return[c[0]*m[0]+c[2]*m[1],c[1]*m[0]+c[3]*m[1],c[0]*m[2]+c[2]*m[3],c[1]*m[2]+c[3]*m[3],c[0]*m[4]+c[2]*m[5]+c[4],c[1]*m[4]+c[3]*m[5]+c[5]];}\n' +
-    '  function makeH(ctm) {\n' +
-    '    function pc(px,py){var x=ctm[0]*px+ctm[2]*py+ctm[4],y=ctm[1]*px+ctm[3]*py+ctm[5];return{x:vt[0]*x+vt[2]*y+vt[4],y:vt[1]*x+vt[3]*y+vt[5]};}\n' +
-    '    function ps(ax,ay,bx,by){var p1=pc(ax,ay),p2=pc(bx,by);if(Math.hypot(p2.x-p1.x,p2.y-p1.y)>=2)pageSegments.push({x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,isCurve:false});}\n' +
-    '    return{pdfToCanvas:pc,pushSeg:ps};\n' +
-    '  }\n' +
-    '  function yn(){return new Promise(function(r){setTimeout(r,0);});}\n' +
+  // ── P4: Disable IDB auto-restore IIFE on iOS ─────────────────
+  // The IIFE at the bottom calls loadPdfBytes + pdfjsLib.getDocument.
+  // On iOS these are already no-ops via the injected block, but guard
+  // the IIFE itself with isIOS too so it exits immediately.
+  rswap(
+    /\(\s*async\s*\(\s*\)\s*=>\s*\{[\s\S]*?loadPdfBytes\s*\([\s\S]*?loadSessionFromStore[\s\S]*?\}\s*\)\s*\(\s*\)\s*;/,
+    '// iOS: auto-restore IIFE disabled — no IDB on iOS (ios-v16)\n' +
+    'if (!isIOS) (async () => {\n' +
     '  try {\n' +
-    '    var ops=await page.getOperatorList(),fn=ops.fnArray,ar=ops.argsArray;\n' +
-    '    var ctm=[1,0,0,1,0,0],st=[[1,0,0,1,0,0]];\n' +
-    '    for(var i=0;i<fn.length;i++){\n' +
-    '      if(i%30===0)await yn();\n' +
-    '      var f=fn[i],a=ar[i];\n' +
-    '      if(f===_OPC.save){st.push(ctm.slice());}\n' +
-    '      else if(f===_OPC.restore){if(st.length>1)ctm=st.pop();}\n' +
-    '      else if(f===_OPC.transform){ctm=cc(ctm,a);}\n' +
-    '      else if(f===_OPC.paintFormXObjectBegin){st.push(ctm.slice());if(a&&Array.isArray(a[1])&&a[1].length===6)ctm=cc(ctm,a[1]);}\n' +
-    '      else if(f===_OPC.paintFormXObjectEnd){if(st.length>1)ctm=st.pop();}\n' +
-    '      else if(f===_OPC.constructPath){var h=makeH(ctm);decodeConstructPath(a[0],a[1],h.pdfToCanvas,h.pushSeg);}\n' +
+    '    const index=JSON.parse(localStorage.getItem(\'mpdf-index\')||\'[]\');\n' +
+    '    if(index.length>0){\n' +
+    '      const latest=index[0];\n' +
+    '      const bytes=await loadPdfBytes(latest.filename);\n' +
+    '      if(bytes){ loadSessionFromStore(latest.filename); }\n' +
     '    }\n' +
-    '    await yn();\n' +
-    '    var seen=new Set(),dd=[];\n' +
-    '    for(var j=0;j<pageSegments.length;j++){\n' +
-    '      if(j%500===0)await yn();\n' +
-    '      var s=pageSegments[j];\n' +
-    '      var k=Math.round(s.x1)+\',\'+Math.round(s.y1)+\',\'+Math.round(s.x2)+\',\'+Math.round(s.y2);\n' +
-    '      var rev=Math.round(s.x2)+\',\'+Math.round(s.y2)+\',\'+Math.round(s.x1)+\',\'+Math.round(s.y1);\n' +
-    '      if(!seen.has(k)&&!seen.has(rev)){seen.add(k);dd.push(s);}\n' +
-    '    }\n' +
-    '    pageSegments=dd; snapGrid=buildSnapGrid(pageSegments);\n' +
-    '    await yn();\n' +
-    '  } catch(e){console.warn(\'[iOS snap]\',e);}\n' +
-    '}\n' +
-    '\n' +
-    'function drawGeometryOverlayIOS() {\n' +
-    '  var ns=\'http://www.w3.org/2000/svg\';\n' +
-    '  var geo=document.getElementById(\'_iosGeoSvg\');\n' +
-    '  if(!geo){\n' +
-    '    geo=document.createElementNS(ns,\'svg\');\n' +
-    '    geo.id=\'_iosGeoSvg\';\n' +
-    '    geo.setAttribute(\'pointer-events\',\'none\');\n' +
-    '    geo.style.cssText=\'position:absolute;top:0;left:0;overflow:visible;\';\n' +
-    '    svgOverlay.parentNode.insertBefore(geo,svgOverlay);\n' +
-    '  }\n' +
-    '  geo.setAttribute(\'width\',svgOverlay.getAttribute(\'width\'));\n' +
-    '  geo.setAttribute(\'height\',svgOverlay.getAttribute(\'height\'));\n' +
-    '  geo.innerHTML=\'\';\n' +
-    '  if(!pageSegments||!pageSegments.length)return;\n' +
-    '  var d=\'\';\n' +
-    '  for(var i=0;i<pageSegments.length;i++){\n' +
-    '    var s=pageSegments[i];\n' +
-    '    d+=\'M\'+s.x1.toFixed(1)+\',\'+s.y1.toFixed(1)+\'L\'+s.x2.toFixed(1)+\',\'+s.y2.toFixed(1);\n' +
-    '  }\n' +
-    '  var path=document.createElementNS(ns,\'path\');\n' +
-    '  path.setAttribute(\'d\',d);\n' +
-    '  path.setAttribute(\'stroke\',\'rgba(39,174,96,0.2)\');\n' +
-    '  path.setAttribute(\'stroke-width\',\'0.8\');\n' +
-    '  path.setAttribute(\'fill\',\'none\');\n' +
-    '  geo.appendChild(path);\n' +
-    '}\n';
-
-  swap(afterExtractor, afterExtractor + batchedCode,
-    'P5 — batched extractor + sibling-SVG single-path overlay');
-
-  // ── P6: Route renderPage to iOS extractor ────────────────────
-  rswap(
-    /extractPageGeometry\(page,\s*vp\)\.then\(\s*\(\)\s*=>\s*\{[\s\S]*?if\s*\(snapEnabled\)\s*drawGeometryOverlay\(\);\s*\}\s*\}\s*\);/,
-    'if (isIOS) {\n' +
-    '        extractPageGeometryIOS(page, vp).then(function () {\n' +
-    '          if (pageSegments.length > 0 && snapEnabled) drawGeometryOverlayIOS();\n' +
-    '        });\n' +
-    '      } else {\n' +
-    '        extractPageGeometry(page, vp).then(() => {\n' +
-    '              if (pageSegments.length > 0) {\n' +
-    '          if (snapEnabled) drawGeometryOverlay();\n' +
-    '        }\n' +
-    '        });\n' +
-    '      }',
-    'P6 — route renderPage to iOS extractor'
+    '  } catch(e) {}\n' +
+    '})();',
+    'P4 — disable IDB auto-restore IIFE on iOS'
   );
 
-  // ── P7: Free bytes in loadSessionFromStore ───────────────────
-  // After pdf.js resolves in loadSessionFromStore, currentPdfBytes
-  // is dead weight — pdf.js worker has the data. Free it so the
-  // restore + render + geometry extraction don't all share RAM.
-  swap(
-    'renderPage(currentPage, true); // renderPage calls loadSession which restores measurements',
-    'if (isIOS) { currentPdfBytes = null; }\n' +
-    '    renderPage(currentPage, true); // renderPage calls loadSession which restores measurements',
-    'P7 — free bytes in loadSessionFromStore after pdf.js resolves'
-  );
-
-  // ── P8: Defer auto-restore until first tap ───────────────────
-  rswap(
-    /if\s*\(\s*bytes\s*\)\s*\{\s*loadSessionFromStore\s*\(\s*latest\.filename\s*\)\s*;\s*\}/,
-    'if (bytes) {\n' +
-    '        if (isIOS) {\n' +
-    '          document.addEventListener(\'pointerdown\', function _dr() {\n' +
-    '            document.removeEventListener(\'pointerdown\', _dr);\n' +
-    '            loadSessionFromStore(latest.filename);\n' +
-    '          }, { once: true, passive: true });\n' +
-    '        } else {\n' +
-    '          loadSessionFromStore(latest.filename);\n' +
-    '        }\n' +
-    '      }',
-    'P8 — defer auto-restore until first tap'
-  );
-
-  // ── P9: Free bytes after IDB save ────────────────────────────
-  rswap(
-    /tx\.oncomplete\s*=\s*\(\)\s*=>\s*res\(true\);/,
-    'tx.oncomplete = () => { if (isIOS) { currentPdfBytes = null; } res(true); };',
-    'P9 — free bytes after IDB save'
-  );
-
-  // ── P10: Version badge ───────────────────────────────────────
+  // ── P5: Inject the runtime block before </body> ──────────────
   var bodyIdx = src.lastIndexOf('</body>');
   if (bodyIdx !== -1) {
-    src = src.slice(0, bodyIdx) +
-      '\n<!-- ios-v15 -->\n' +
-      '<div style="position:fixed;bottom:4px;right:6px;z-index:9999;' +
-      'font-family:monospace;font-size:9px;color:rgba(255,255,255,0.25);' +
-      'pointer-events:none;letter-spacing:0.05em;">ios-v15</div>\n' +
-      src.slice(bodyIdx);
-    log('  P10 — version badge (ios-v15)', 'ok'); ok++;
-  } else { log('  P10 — no </body>', 'err'); fail++; }
+    src = src.slice(0, bodyIdx) + INJECT + src.slice(bodyIdx);
+    log('  P5 — iOS runtime block injected (crash log + touch gate + batched snap + no IDB)', 'ok'); ok++;
+  } else {
+    log('  P5 — no </body> found', 'err'); fail++;
+  }
 
   return { src: src, ok: ok, fail: fail };
 }
