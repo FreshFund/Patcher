@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MeasurePDF iOS Patcher v10</title>
+<title>MeasurePDF iOS Patcher v11</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
@@ -58,7 +58,7 @@ p.sub { font-size:13px; color:#666; line-height:1.6; }
   </div>
   <div>
     <h1>Modern <span>Measure</span></h1>
-    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v10</h1>
+    <h1 style="font-size:14px;font-weight:400;color:#666;margin-top:4px;">iOS Patcher v11</h1>
   </div>
   <p class="sub">Fixes fast-pan, refresh/restore, and second-document crashes. Use your <strong style="color:#f0ede8">original</strong> canvas.html only.</p>
 
@@ -121,8 +121,8 @@ inp.addEventListener('change', function () {
     var src = reader.result;
     log(Math.round(src.length / 1024) + ' KB loaded.', 'info');
 
-    if (src.indexOf('_iosMemFree') !== -1) {
-      log('Already patched — use the ORIGINAL canvas.html', 'warn');
+    if (src.indexOf('ios-v11') !== -1) {
+      log('Already patched with v11 — use the ORIGINAL canvas.html', 'warn');
     }
     if (src.indexOf('const renderScale=2.0;') === -1) {
       log('renderScale=2.0 not found — may be wrong file', 'warn');
@@ -172,7 +172,7 @@ function applyAll(src) {
     'const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||\n' +
     '  (navigator.platform === \'MacIntel\' && navigator.maxTouchPoints > 1);\n' +
     'const renderScale = isIOS ? 1.0 : 2.0;',
-    'P1 — isIOS + renderScale 1.0 (4x less canvas RAM)'
+    'P1 — isIOS + renderScale 1.0'
   );
 
   // P2: debounce SVG rebuild during pan
@@ -187,7 +187,7 @@ function applyAll(src) {
     '    cancelAnimationFrame(_rafRedraw);\n' +
     '    _rafRedraw = requestAnimationFrame(function () { redrawOverlay(); });\n' +
     '  }',
-    'P2 — debounce SVG redraw during pan (fast-pan crash)'
+    'P2 — debounce SVG redraw during pan'
   );
 
   // P3: declare _iosRDTimer
@@ -217,73 +217,90 @@ function applyAll(src) {
     'P4 — cache getBoundingClientRect'
   );
 
-  // P5: inject iOS memory block before closing script tag
-  // IMPORTANT: use '<\/script>' so the browser does not close THIS script tag
-  // when parsing the patcher page itself.
-  var closeTag = '<\/script>';
-  var lastClose = src.lastIndexOf(closeTag);
-  if (lastClose !== -1) {
-    var block = [
-      '',
-      '// iOS memory management — injected by patcher v10',
-      '(function () {',
-      '  if (!isIOS) return;',
-      '',
-      '  // Wrap pdfjsLib.getDocument: free currentPdfBytes once worker has data',
-      '  var _origGetDoc = pdfjsLib.getDocument.bind(pdfjsLib);',
-      '  pdfjsLib.getDocument = function (params) {',
-      '    var task = _origGetDoc(params);',
-      '    task.promise = task.promise.then(function (doc) {',
-      '      setTimeout(function () { currentPdfBytes = null; }, 200);',
-      '      return doc;',
-      '    }, function (e) { return Promise.reject(e); });',
-      '    return task;',
-      '  };',
-      '',
-      '  // Wrap loadPDF: clear old geometry before loading new PDF',
-      '  var _origLoadPDF = loadPDF;',
-      '  loadPDF = function (file) {',
-      '    pageSegments = []; snapGrid = null;',
-      '    _origLoadPDF(file);',
-      '  };',
-      '',
-      '  // Wrap loadSessionFromStore: clear geometry + defer until first tap',
-      '  var _origLoadSession = loadSessionFromStore;',
-      '  loadSessionFromStore = async function (filename) {',
-      '    pageSegments = []; snapGrid = null;',
-      '    return _origLoadSession(filename);',
-      '  };',
-      '',
-      '  // Block the startup auto-restore IIFE from running immediately.',
-      '  // It calls loadPdfBytes — return null so it bails, then restore on first tap.',
-      '  var _origLoadPdfBytes = loadPdfBytes;',
-      '  var _tapReady = false;',
-      '  loadPdfBytes = async function (filename) {',
-      '    if (!_tapReady) return null;',
-      '    return _origLoadPdfBytes(filename);',
-      '  };',
-      '  document.addEventListener(\'pointerdown\', function _firstTap() {',
-      '    document.removeEventListener(\'pointerdown\', _firstTap);',
-      '    _tapReady = true;',
-      '    loadPdfBytes = _origLoadPdfBytes; // restore original',
-      '    if (!pdfDoc) {',
-      '      try {',
-      '        var idx = JSON.parse(localStorage.getItem(\'mpdf-index\') || \'[]\');',
-      '        if (idx.length > 0) loadSessionFromStore(idx[0].filename);',
-      '      } catch(e) {}',
-      '    }',
-      '  }, { once: true, passive: true });',
-      '',
-      '})();',
-      ''
-    ].join('\n');
-    src = src.slice(0, lastClose) + block + src.slice(lastClose);
-    log('  P5 — iOS memory management block', 'ok'); ok++;
+  // P5: version badge + iOS memory block as a SECOND <script> tag
+  // Injected just before </body> — completely separate from the main script,
+  // so there is zero risk of the HTML parser seeing <\/script> inside a string.
+  // Runs after the main script has finished executing.
+  var bodyClose = '</body>';
+  var bodyIdx = src.lastIndexOf(bodyClose);
+  if (bodyIdx !== -1) {
+    var inject = buildIosBlock();
+    src = src.slice(0, bodyIdx) + inject + '\n' + src.slice(bodyIdx);
+    log('  P5 — iOS memory block + version badge', 'ok'); ok++;
   } else {
-    log('  P5 — could not find closing script tag', 'err'); fail++;
+    log('  P5 — could not find </body>', 'err'); fail++;
   }
 
   return { src: src, ok: ok, fail: fail };
+}
+
+// Returns a complete script tag — no unescaped close tags inside strings.
+function buildIosBlock() {
+  var lines = [
+    '',
+    '<!-- ios-v11: injected by patcher v11 -->',
+    '<div id="ios-ver" style="position:fixed;bottom:6px;right:8px;z-index:9999;',
+    '  font-family:monospace;font-size:10px;color:rgba(255,255,255,0.3);',
+    '  pointer-events:none;">ios-v11</div>',
+    '',
+    '<scr' + 'ipt>',  // split so patcher's own parser doesn't choke
+    '(function () {',
+    '  // Only run on iOS',
+    '  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||',
+    '    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);',
+    '  if (!isIOS) return;',
+    '',
+    '  // ── 1. Wrap loadPDF: clear old geometry before loading ──────',
+    '  var _origLoadPDF = window.loadPDF;',
+    '  if (_origLoadPDF) {',
+    '    window.loadPDF = function (file) {',
+    '      window.pageSegments = [];',
+    '      window.snapGrid = null;',
+    '      return _origLoadPDF(file);',
+    '    };',
+    '  }',
+    '',
+    '  // ── 2. Wrap loadSessionFromStore: clear geometry ─────────────',
+    '  var _origLSFS = window.loadSessionFromStore;',
+    '  if (_origLSFS) {',
+    '    window.loadSessionFromStore = async function (filename) {',
+    '      window.pageSegments = [];',
+    '      window.snapGrid = null;',
+    '      return _origLSFS(filename);',
+    '    };',
+    '  }',
+    '',
+    '  // ── 3. Defer startup auto-restore until first tap ────────────',
+    '  // The auto-restore IIFE at the bottom of the main script calls',
+    '  // loadPdfBytes() immediately on page load. On iOS, doing PDF',
+    '  // parse + canvas render + IDB restore all at once = OOM crash.',
+    '  // Block loadPdfBytes until first pointerdown, then restore.',
+    '  var _origLPB = window.loadPdfBytes;',
+    '  if (_origLPB) {',
+    '    window.loadPdfBytes = async function (filename) {',
+    '      // Return null — auto-restore IIFE will silently bail',
+    '      return null;',
+    '    };',
+    '    document.addEventListener("pointerdown", function _tap() {',
+    '      document.removeEventListener("pointerdown", _tap);',
+    '      // Restore original so subsequent IDB reads work normally',
+    '      window.loadPdfBytes = _origLPB;',
+    '      // Trigger the restore that was blocked',
+    '      if (!window.pdfDoc) {',
+    '        try {',
+    '          var idx = JSON.parse(localStorage.getItem("mpdf-index") || "[]");',
+    '          if (idx.length > 0) window.loadSessionFromStore(idx[0].filename);',
+    '        } catch(e) {}',
+    '      }',
+    '    }, { once: true, passive: true });',
+    '  }',
+    '',
+    '})();',
+    ''
+  ];
+
+  // Join and fix the split script tag back together
+  return lines.join('\n').replace('<scr' + 'ipt>', '<script>');
 }
 </script>
 </body>
